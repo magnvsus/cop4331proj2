@@ -1,6 +1,11 @@
 const express = require('express');
 const cors = require('cors');
 const app = express();
+const DBNAME = "";
+// Passwords are hashed using bcrypt
+const bcrypt = require('bcrypt');
+const SALT_ROUNDS = 10;
+
 
 app.use(cors());
 app.use(express.json());
@@ -20,6 +25,86 @@ app.use((req, res, next) => {
 
 app.listen(5000); // start Node + Express server on port 5000
 
+app.post('/api/login', async (req, res, next) =>
+{
+  var error = '';
+  const { email, password } = req.body;
+  var id = -1;
+
+  try
+  {
+    const db = client.db(DBNAME);
+
+    // find by username
+    const user = await db.collection('Users').findOne({ email: email });
+
+    if (user)
+    {
+      // auth check, use bcrypt to compare
+      const passwordMatches = await bcrypt.compare(password, user.Password);
+
+      if (passwordMatches)
+      {
+        id = user._id;
+      }
+      else
+      {
+        error = 'Invalid user name/password';
+        res.status(401).json(ret);
+      }
+    }
+    else
+    {
+      error = 'Invalid user name/password';
+      res.status(401).json(ret);
+    }
+  }
+  catch (e)
+  {
+    error = e.toString();
+  }
+
+  var ret = { id: id, firstName: fn, lastName: ln, error: error };
+  res.status(200).json(ret);
+});
+
+app.post('/api/register', async (req, res, next) =>
+{
+  var error = '';
+  const { email, password } = req.body;
+
+  try
+  {
+    const db = client.db(DBNAME);
+
+    // check for an existing user first
+    const existing = await db.collection('Users').findOne({ email: email });
+    if (existing)
+    {
+      var ret = { error: 'Email is already in use. Please sign in.' };
+      res.status(200).json(ret);
+      return;
+    }
+
+    // hash password before storing
+    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+
+    await db.collection('Users').insertOne({
+      email: email,
+      password: hashedPassword,
+    });
+
+    var ret = { error: '' };
+    res.status(201).json(ret);
+  }
+  catch (e)
+  {
+    var ret = { error: e.toString() };
+    res.status(200).json(ret);
+  }
+});
+
+/* Sample API
 app.post('/api/addcard', async (req, res, next) => {
   // incoming: userId, color
   // outgoing: error
@@ -29,8 +114,9 @@ app.post('/api/addcard', async (req, res, next) => {
   cardList.push(card);
   var ret = { error: error };
   res.status(200).json(ret);
-});
+});*/
 
+/* Sample API
 app.post('/api/login', async (req, res, next) => {
   // incoming: login, password
   // outgoing: id, firstName, lastName, error
@@ -51,8 +137,9 @@ app.post('/api/login', async (req, res, next) => {
 
   var ret = { id: id, firstName: fn, lastName: ln, error: error };
   res.status(200).json(ret);
-});
+});*/
 
+/* Sample API
 app.post('/api/searchcards', async (req, res, next) => {
   // incoming: userId, search
   // outgoing: results[], error
@@ -70,7 +157,7 @@ app.post('/api/searchcards', async (req, res, next) => {
 
   var ret = { results: _ret, error: '' };
   res.status(200).json(ret);
-});
+});*/
 
 var cardList =
   [
