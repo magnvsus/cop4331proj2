@@ -1,0 +1,376 @@
+swagger: "2.0"
+
+# Metadata
+info:
+  description: 'Group 25 Large Project - Coffee - API Documentation'
+  version: '0.0.1'
+  title: 'Coffee'
+  contact:
+    email:
+      - 'mi993440@ucf.edu'
+
+# Docs
+paths:
+  /api/login:
+    post:
+      tags:
+      - users
+      summary: Log in page for users
+      description: Authenticates users
+      operationId: loginPage
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      parameters:
+      - in: body
+        name: loginItem
+        description: login
+        schema:
+          $ref: '#/definitions/login'
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/responseLogin'
+        400:
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/responseErrorRequest'
+        401:
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/responseErrorAuth'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/responseErrorServer'
+
+  /api/register:
+    post:
+      tags:
+      - users
+      summary: Registers users
+      description: Registers users in database
+      operationId: Register
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      parameters:
+      - in: body
+        name: register
+        description: register
+        schema:
+          $ref: '#/definitions/register'
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/responseGeneric'
+        201:
+          description: Created
+          schema:
+            $ref: '#/definitions/responseGeneric'
+        400:
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/responseErrorRequest'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/responseErrorServer'
+
+  /api/itemAdd:
+    post:
+      tags:
+      - items
+      summary: Add items
+      operationId: itemAdd
+      description: Adds items to personal inventory
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      parameters:
+      - in: body
+        name: itemAdd
+        description: Add item
+        schema:
+          $ref: '#/definitions/itemAdd'
+      responses:
+        201:
+          description: Created
+          schema:
+            $ref: '#/definitions/responseGeneric'
+        400:
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/responseErrorRegistration'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/responseErrorServer'
+
+  /api/itemSearch:
+    post:
+      tags:
+      - items
+      summary: Searches for items
+      operationId: itemSearch
+      description: Searches items from personal inventory
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      parameters:
+      - in: body
+        name: itemSearch
+        description: Search item
+        schema:
+          $ref: '#/definitions/itemSearch'
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/responseSearch'
+        400:
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/responseErrorRequest'
+        404:
+          description: Contact Not Found
+          schema:
+            $ref: '#/definitions/responseErrorNotFound'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/responseErrorServer'
+
+  /api/itemRemove:
+    post:
+      tags:
+      - items
+      summary: Removes item
+      operationId: contactDelete
+      description: Removes items from personal inventory
+      produces:
+      - application/json
+      parameters:
+      - in: body
+        name: itemDelete
+        description: Item deletion
+        schema:
+          $ref: '#/definitions/itemDelete'
+      responses:
+        204:
+          description: No Content
+          schema:
+            $ref: '#/definitions/responseGeneric'
+        400:
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/responseErrorRequest'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/responseErrorServer'
+
+  /api/itemUpdate:
+    post:
+      tags:
+      - items
+      summary: Updates items
+      operationId: itemUpdate
+      description: Updates items in personal inventory
+      produces:
+      - application/json
+      parameters:
+      - in: body
+        name: itemUpdate
+        description: Item update
+        schema:
+          $ref: '#/definitions/itemUpdate'
+      responses:
+        201:
+          description: Created
+          schema:
+            $ref: '#/definitions/responseGeneric'
+        400:
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/responseErrorRequest'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/responseErrorServer'
+
+
+
+definitions:
+  login:
+    type: object
+    required:
+    - email
+    - password
+    properties:
+      email:
+        type: string
+        example: jdoe@email.com
+      password:
+        type: string
+        example: Password123
+
+  register:
+    type: object
+    required:
+    - email
+    - password
+    properties:
+      email:
+        type: string
+        example: jdoe@email.com
+      password:
+        type: string
+        example: Password123
+
+  itemAdd:
+    type: object
+    required:
+    - _id
+    - accountID
+    - categoryID
+    - name
+    - amount
+    - pictureURL
+    - threshold
+    properties:
+      _id:
+        type: integer
+        example: 123
+      accountID:
+        type: integer
+        example: 123
+      categoryID:
+        type: integer
+        example: 123
+      name:
+        type: string
+        example: "Item"
+      amount:
+        type: integer
+        example: 123
+      pictureURL:
+        type: string
+        example: "site.com/image.jpg"
+      threshold:
+        type: integer
+        example: 123
+
+  itemSearch:
+    type: object
+    required:
+    - accountID
+    - search
+    properties:
+      _id:
+        type: integer
+        example: 123
+      search:
+        type: string
+        example: "item"
+
+  itemDelete:
+    type: object
+    required:
+    - _id
+    - accountID
+    properties:
+      accountID:
+        type: integer
+        example: 123
+      _id:
+        type: integer
+        example: 123
+
+  itemUpdate:
+    type: object
+    required:
+    - _id
+    - accountID
+    - categoryID
+    - name
+    - amount
+    - pictureURL
+    - threshold
+    properties:
+      UserID:
+        type: integer
+        example: 123
+
+
+  #Responses
+  responseLogin:
+    type: object
+    properties:
+      _id:
+        type: integer
+        example: 123
+      error:
+        type: string
+        example: ""
+
+  responseSearch:
+    type: object
+    required:
+    - _id
+    - search
+    properties:
+      _id:
+        type: integer
+        example: 123
+      search:
+        type: string
+        example: "item"
+
+  responseGeneric:
+    type: object
+    properties:
+      Error:
+        type: string
+        example: ""
+
+  responseErrorRequest:
+    type: object
+    properties:
+      error:
+        type: string
+        example: "All fields must be filled."
+
+  responseErrorAuth:
+    type: object
+    properties:
+      error:
+        type: string
+        example: "Invalid Credentials"
+
+  responseErrorServer:
+    type: object
+    properties:
+      error:
+        type: string
+        example: "Internal server error."
+
+  responseErrorRegistration:
+    type: object
+    properties:
+      Error:
+        type: string
+        example: "Registration failed"
+
+  responseErrorNotFound:
+    type: object
+    properties:
+      Error:
+        type: string
+        example: "No Records Found"
