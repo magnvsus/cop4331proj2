@@ -48,7 +48,7 @@ function Login() {
       <input type="password" id="loginPassword" placeholder="Password" onChange={handleSetPassword} /><br />
       <input type="submit" id="loginButton" className="buttons" value="Do It"
         onClick={doLogin} />
-      <span id="loginResult"></span>
+      <span id="loginResult">{message}</span>
     </div>
   );
 };
