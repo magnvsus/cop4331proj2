@@ -1,9 +1,9 @@
-const express = require('express');
-const cors = require('cors');
+import express from 'express';
+import cors from 'cors';
 const app = express();
-const DBNAME = "";
+import { connectDB, isConfigured, getDB } from './db.js';
 // Passwords are hashed using bcrypt
-const bcrypt = require('bcrypt');
+import bcrypt from 'bcrypt';
 const SALT_ROUNDS = 10;
 
 
@@ -23,7 +23,22 @@ app.use((req, res, next) => {
   next();
 });
 
-app.listen(5000); // start Node + Express server on port 5000
+app.listen(process.env.API_PORT); // start Node + Express server on port 5000
+
+
+connectDB();
+
+async function requireDB(req, res, next)
+{
+  const db = await connectDB();
+  if(!db)
+  {
+    res.status(503).json({error: 'Database is not configured yet'});
+    return;
+  }
+  req.db = db;
+  next();
+}
 
 app.post('/api/login', async (req, res, next) =>
 {
@@ -33,10 +48,8 @@ app.post('/api/login', async (req, res, next) =>
 
   try
   {
-    const db = client.db(DBNAME);
-
     // find by username
-    const user = await db.collection('Users').findOne({ email: email });
+    const user = await req.db.collection('Users').findOne({ email: email });
 
     if (user)
     {
@@ -75,10 +88,8 @@ app.post('/api/register', async (req, res, next) =>
 
   try
   {
-    const db = client.db(DBNAME);
-
     // check for an existing user first
-    const existing = await db.collection('Users').findOne({ email: email });
+    const existing = await req.db.collection('Users').findOne({ email: email });
     if (existing)
     {
       var ret = { error: 'Email is already in use. Please sign in.' };
@@ -113,29 +124,6 @@ app.post('/api/addcard', async (req, res, next) => {
   // TEMP FOR LOCAL TESTING.
   cardList.push(card);
   var ret = { error: error };
-  res.status(200).json(ret);
-});*/
-
-/* Sample API
-app.post('/api/login', async (req, res, next) => {
-  // incoming: login, password
-  // outgoing: id, firstName, lastName, error
-  var error = '';
-  const { login, password } = req.body;
-  var id = -1;
-  var fn = '';
-  var ln = '';
-
-  if (login?.toLowerCase() == 'rickl' && password == 'COP4331') {
-    id = 1;
-    fn = 'Rick';
-    ln = 'Leinecker';
-  }
-  else {
-    error = 'Invalid user name/password';
-  }
-
-  var ret = { id: id, firstName: fn, lastName: ln, error: error };
   res.status(200).json(ret);
 });*/
 
