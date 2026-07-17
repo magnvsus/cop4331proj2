@@ -1,0 +1,19 @@
+[Unit]
+Description=InventoryHub Backend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=</path/to/proj/backend>
+ExecStart=</path/to/node> server.js
+Restart=on-failure
+User=<system_user>
+# Optional: Create separate user for service
+#User=<dedicated_user>
+#Group=<dedicated_user>
+
+[Install]
+WantedBy=multi-user.target
+
+
+
