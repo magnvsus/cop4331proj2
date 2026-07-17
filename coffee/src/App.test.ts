@@ -29,6 +29,22 @@ describe('normalizeItem', () => {
     })
   })
 
+  it('keeps a relative pictureURL as-is instead of resolving it to an absolute URL', () => {
+    // image must stay the raw value the server returned -- it gets sent
+    // straight back as pictureURL on save, and resolving it here would mean
+    // saving an absolute URL, which breaks the backend's "is this one of our
+    // own /uploads/ files" check when it's time to delete it.
+    const apiItem: ApiItem = {
+      _id: 'item-2',
+      categoryID: 'cat-1',
+      name: 'Oat Milk',
+      amount: 3,
+      pictureURL: '/uploads/abc123.jpg',
+    }
+
+    expect(normalizeItem(apiItem, categoryNameById).image).toBe('/uploads/abc123.jpg')
+  })
+
   it('falls back to sensible defaults when optional fields are missing', () => {
     const apiItem: ApiItem = {
       _id: 'item-2',

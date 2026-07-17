@@ -55,6 +55,8 @@ cd ..
 | `jsonwebtoken` | JWT auth tokens |
 | `dotenv` | Loads `.env` config |
 | `cors` | Cross-origin requests from the frontend |
+| `multer` | Parses multipart/form-data uploads (item photos) |
+| `sharp` | Resizes/compresses uploaded item photos before they're saved to disk |
 
 **`coffee/`** — the React frontend:
 | Package | Purpose |
@@ -65,6 +67,7 @@ cd ..
 | `typescript` *(dev)* | Type checking (`tsc -b`) |
 | `vitest` *(dev)* | Frontend test runner |
 | `oxlint` *(dev)* | Linting |
+| `prettier` *(dev)* | Code formatting (`npm run format`) |
 | `@types/react`, `@types/react-dom`, `@types/node` *(dev)* | Type declarations (`@types/node` is needed for type-checking `vite.config.ts`) |
 
 ## Environment variables
@@ -108,4 +111,12 @@ npm run preview
 ```bash
 # Run backend and frontend tests in sequence, from the repo root
 npm test
+```
+
+## Formatting
+
+```bash
+cd coffee
+npm run format         # rewrites files in place
+npm run format:check   # check only, no changes -- useful in CI
 ```
