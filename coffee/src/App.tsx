@@ -21,9 +21,16 @@ const demoItems: Item[] = [
 
 const blankItem = (): Omit<Item, 'id'> => ({ name: '', sku: '', category: 'Dairy', quantity: 0, unit: 'units', min: 5, image: '' })
 
+// Unions the starter categories with an account's real ones (deduped) rather
+// than replacing them, so an account with only a couple of its own categories
+// saved doesn't lose access to the rest of the starter list in the dropdown.
+export function mergeCategoryNames(starterNames: string[], fetchedNames: string[]): string[] {
+  return Array.from(new Set([...starterNames, ...fetchedNames]))
+}
+
 // Maps a server item (plus a categoryID -> name lookup, since the server only
 // knows the category by its id) into what the UI expects.
-function normalizeItem(apiItem: api.ApiItem, categoryNameById: Record<string, string>): Item {
+export function normalizeItem(apiItem: api.ApiItem, categoryNameById: Record<string, string>): Item {
   return {
     id: apiItem._id,
     name: apiItem.name,
@@ -156,12 +163,6 @@ function CustomApp() {
   const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const categoryNameById = useMemo(() => {
-    const map: Record<string, string> = {}
-    Object.entries(categoryIdByName).forEach(([name, id]) => { map[id] = name })
-    return map
-  }, [categoryIdByName])
-
   // Load categories first, then items -- items only store a categoryID, so we
   // need the id->name map in hand before normalizeItem can show a category name.
   useEffect(() => {
@@ -177,10 +178,7 @@ function CustomApp() {
         const nameById: Record<string, string> = {}
         fetchedCategories.forEach(c => { idByName[c.name] = c._id; nameById[c._id] = c.name })
         setCategoryIdByName(idByName)
-        // Union with the starter categories rather than replacing them, so an
-        // account that only has a couple of its own categories saved doesn't
-        // lose access to the rest of the starter list in the dropdown.
-        const names = Array.from(new Set([...categories, ...fetchedCategories.map(c => c.name)]))
+        const names = mergeCategoryNames(categories, fetchedCategories.map(c => c.name))
         setBusinessCategories(names)
         setCategoryInput(names.join(', '))
 

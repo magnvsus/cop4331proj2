@@ -51,14 +51,15 @@ export async function login(email: string, password: string): Promise<{ token: s
 }
 
 // ---------------- Items ----------------
-// Matches your Item schema: name, amount, categoryID, pictureURL, lowStockThreshold
-// -- there is no sku or unit field on the backend.
+// Matches your Item schema: name, sku, unit, amount, categoryID, pictureURL, lowStockThreshold
 
 export type ApiItem = {
   _id: string;
   accountID?: string;
   categoryID: string;
   name: string;
+  sku?: string;
+  unit?: string;
   amount: number;
   pictureURL?: string;
   lowStockThreshold?: number;
@@ -66,6 +67,8 @@ export type ApiItem = {
 
 export type NewItemPayload = {
   name: string;
+  sku?: string;
+  unit?: string;
   amount: number;
   categoryID: string;
   pictureURL?: string;
