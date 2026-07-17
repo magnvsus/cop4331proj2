@@ -280,12 +280,37 @@
 .search {
   position: relative;
 }
-.search .icon {
+.search > .icon {
   position: absolute;
   left: 10px;
   top: 9px;
   width: 16px;
   color: #968e87;
+}
+.search.with-scan input {
+  padding-right: 33px;
+}
+.search-scan-button {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 23px;
+  height: 23px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: #968e87;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.search-scan-button:hover {
+  background: #f0ebe5;
+  color: #62574e;
+}
+.search-scan-button .icon {
+  width: 14px;
+  height: 14px;
 }
 .tools input,
 .tools select {
@@ -982,6 +1007,31 @@ tbody tr:hover {
   color: #a33b31;
   font-size: 10px;
   margin-left: 8px;
+}
+.sku-field-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 7px;
+}
+.sku-field-row input {
+  margin-top: 0;
+  flex: 1;
+}
+.scan-button {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #ddd7d0;
+  border-radius: 8px;
+  background: #fff;
+  color: #62574e;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.scan-button .icon {
+  width: 18px;
+  height: 18px;
 }
 
 /* Settings / customize page */

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { Camera } from '@capacitor/camera'
+import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning'
 import './App.css'
 import * as api from './api'
 
@@ -105,6 +106,7 @@ function Icon({
     | 'coffee'
     | 'camera'
     | 'gallery'
+    | 'scan'
 }) {
   const paths: Record<string, React.ReactNode> = {
     grid: (
@@ -173,6 +175,12 @@ function Icon({
         <rect x="3" y="3" width="18" height="18" rx="2" />
         <circle cx="8.5" cy="8.5" r="1.5" />
         <path d="m21 15-5-5L5 21" />
+      </>
+    ),
+    scan: (
+      <>
+        <path d="M3 7V4a1 1 0 0 1 1-1h3M17 3h3a1 1 0 0 1 1 1v3M21 17v3a1 1 0 0 1-1 1h-3M7 21H4a1 1 0 0 1-1-1v-3" />
+        <path d="M7 12h10" />
       </>
     ),
   }
@@ -594,6 +602,43 @@ function App() {
     }
   }
 
+  // Shared barcode-scan flow: checks the Google Barcode Scanner module is
+  // available (kicking off installation if not), then scans and returns the
+  // decoded value. Used by both the item modal's SKU field and the
+  // inventory search bar.
+  const scanBarcodeValue = async (): Promise<string | undefined> => {
+    const { available } = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable()
+    if (!available) {
+      await BarcodeScanner.installGoogleBarcodeScannerModule()
+      setLoadError('Downloading the barcode scanner -- please try scanning again in a moment.')
+      return undefined
+    }
+    const { barcodes } = await BarcodeScanner.scan()
+    return barcodes[0]?.displayValue
+  }
+
+  // Scans a barcode and drops the decoded value straight into the SKU field.
+  const scanBarcode = async () => {
+    setLoadError('')
+    try {
+      const value = await scanBarcodeValue()
+      if (value) setDraft((current) => ({ ...current, sku: value }))
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not scan barcode')
+    }
+  }
+
+  // Scans a barcode and uses the decoded value to search the inventory.
+  const scanSearchBarcode = async () => {
+    setLoadError('')
+    try {
+      const value = await scanBarcodeValue()
+      if (value) setQuery(value)
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not scan barcode')
+    }
+  }
+
   if (!loggedIn) return <Login onLogin={handleLogin} />
 
   // ---------------- Render ----------------
@@ -615,13 +660,23 @@ function App() {
           </p>
         </div>
         <div className="tools">
-          <label className="search">
+          <label className={isNativePlatform ? 'search with-scan' : 'search'}>
             <Icon name="search" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search items or SKU..."
             />
+            {isNativePlatform && (
+              <button
+                type="button"
+                className="search-scan-button"
+                aria-label="Scan barcode to search"
+                onClick={scanSearchBarcode}
+              >
+                <Icon name="scan" />
+              </button>
+            )}
           </label>
           <select value={category} onChange={(event) => setCategory(event.target.value)}>
             <option>All categories</option>
@@ -1049,11 +1104,23 @@ function App() {
               </label>
               <label>
                 SKU
-                <input
-                  value={draft.sku}
-                  onChange={(event) => setDraft({ ...draft, sku: event.target.value })}
-                  required
-                />
+                <div className="sku-field-row">
+                  <input
+                    value={draft.sku}
+                    onChange={(event) => setDraft({ ...draft, sku: event.target.value })}
+                    required
+                  />
+                  {isNativePlatform && (
+                    <button
+                      type="button"
+                      className="scan-button"
+                      aria-label="Scan barcode"
+                      onClick={scanBarcode}
+                    >
+                      <Icon name="scan" />
+                    </button>
+                  )}
+                </div>
               </label>
               <label>
                 Category
