@@ -1,7 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import { Capacitor } from '@capacitor/core'
+import { Camera } from '@capacitor/camera'
 import './App.css'
 import * as api from './api'
+
+// Native camera/gallery capture only makes sense inside the wrapped Android
+// app -- on the plain website there's no native bridge to call, so that case
+// keeps using the regular HTML file input instead.
+const isNativePlatform = Capacitor.isNativePlatform()
+
+// Camera/gallery results come back as base64 thumbnails, not File objects --
+// this converts one into a File so it can flow through the same
+// pendingPhoto/deferred-upload path as a file picked via the web input.
+function base64ToFile(base64: string, filename: string, mimeType: string): File {
+  const byteString = atob(base64)
+  const bytes = new Uint8Array(byteString.length)
+  for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i)
+  return new File([bytes], filename, { type: mimeType })
+}
 
 type Item = {
   id: string
@@ -76,7 +93,18 @@ export function normalizeItem(
 function Icon({
   name,
 }: {
-  name: 'grid' | 'box' | 'alert' | 'search' | 'plus' | 'edit' | 'trash' | 'logout' | 'coffee'
+  name:
+    | 'grid'
+    | 'box'
+    | 'alert'
+    | 'search'
+    | 'plus'
+    | 'edit'
+    | 'trash'
+    | 'logout'
+    | 'coffee'
+    | 'camera'
+    | 'gallery'
 }) {
   const paths: Record<string, React.ReactNode> = {
     grid: (
@@ -132,6 +160,19 @@ function Icon({
       <>
         <path d="M4 8h13v7a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V8Z" />
         <path d="M17 10h1a3 3 0 0 1 0 6h-1M7 4c0 1 1 1 1 2M11 3c0 1 1 1 1 2" />
+      </>
+    ),
+    camera: (
+      <>
+        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
+        <circle cx="12" cy="13" r="4" />
+      </>
+    ),
+    gallery: (
+      <>
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <circle cx="8.5" cy="8.5" r="1.5" />
+        <path d="m21 15-5-5L5 21" />
       </>
     ),
   }
@@ -532,6 +573,27 @@ function App() {
     setPendingPhoto(file)
   }
 
+  const takeNativePhoto = async () => {
+    try {
+      const result = await Camera.takePhoto({ quality: 80 })
+      if (result.thumbnail)
+        setPendingPhoto(base64ToFile(result.thumbnail, 'photo.jpg', 'image/jpeg'))
+    } catch {
+      // User cancelled the camera or denied permission -- nothing to report.
+    }
+  }
+
+  const chooseFromGalleryNative = async () => {
+    try {
+      const { results } = await Camera.chooseFromGallery({})
+      const photo = results[0]
+      if (photo?.thumbnail)
+        setPendingPhoto(base64ToFile(photo.thumbnail, 'photo.jpg', 'image/jpeg'))
+    } catch {
+      // User cancelled the picker -- nothing to report.
+    }
+  }
+
   if (!loggedIn) return <Login onLogin={handleLogin} />
 
   // ---------------- Render ----------------
@@ -930,17 +992,38 @@ function App() {
               <div>
                 <strong>Item photo</strong>
                 <p>Upload an image or take a photo on your phone.</p>
-                <label className="photo-button" aria-disabled={submitting}>
-                  <span className="desktop-only">Choose photo</span>
-                  <span className="mobile-only">Choose or take photo</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    disabled={submitting}
-                    onChange={(event) => choosePhoto(event.target.files?.[0])}
-                  />
-                </label>
+                {isNativePlatform ? (
+                  <div className="photo-source-buttons">
+                    <button
+                      type="button"
+                      className="photo-button"
+                      disabled={submitting}
+                      onClick={takeNativePhoto}
+                    >
+                      <Icon name="camera" /> Camera
+                    </button>
+                    <button
+                      type="button"
+                      className="photo-button"
+                      disabled={submitting}
+                      onClick={chooseFromGalleryNative}
+                    >
+                      <Icon name="gallery" /> Gallery
+                    </button>
+                  </div>
+                ) : (
+                  <label className="photo-button" aria-disabled={submitting}>
+                    <span className="desktop-only">Choose photo</span>
+                    <span className="mobile-only">Choose or take photo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      disabled={submitting}
+                      onChange={(event) => choosePhoto(event.target.files?.[0])}
+                    />
+                  </label>
+                )}
                 {(pendingPhotoPreview || draft.image) && (
                   <button
                     type="button"

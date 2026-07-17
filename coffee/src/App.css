@@ -948,9 +948,14 @@ tbody tr:hover {
   color: #8e857e;
   margin: 4px 0 10px;
 }
+.photo-source-buttons {
+  display: flex;
+  gap: 8px;
+}
 .photo-button {
   display: inline-flex !important;
   align-items: center;
+  gap: 6px;
   width: auto !important;
   margin: 0 !important;
   border: 1px solid #d8d1c9;
@@ -960,6 +965,10 @@ tbody tr:hover {
   color: #62574e !important;
   font-size: 10px !important;
   cursor: pointer;
+}
+.photo-button .icon {
+  width: 14px;
+  height: 14px;
 }
 .photo-button input {
   display: none;
