@@ -9,7 +9,7 @@ function buildPath(route: string): string {
   if (import.meta.env.DEV) {
     return 'http://localhost:5000' + route;
   }
-  return 'http://' + APP_DOMAIN + route;
+  return 'https://' + APP_DOMAIN + route;
 }
 
 function authHeaders(): HeadersInit {
