@@ -21,19 +21,16 @@ const demoItems: Item[] = [
 
 const blankItem = (): Omit<Item, 'id'> => ({ name: '', sku: '', category: 'Dairy', quantity: 0, unit: 'units', min: 5, image: '' })
 
-// The backend Item schema only has name/amount/categoryID/pictureURL/lowStockThreshold --
-// there is no sku or unit field. This maps a server item (plus a categoryID -> name
-// lookup, since the server only knows the category by its id) into what the UI expects.
-// sku/unit are intentionally left blank here; see saveItem() for how they're kept
-// visible for the current session even though the backend doesn't persist them.
+// Maps a server item (plus a categoryID -> name lookup, since the server only
+// knows the category by its id) into what the UI expects.
 function normalizeItem(apiItem: api.ApiItem, categoryNameById: Record<string, string>): Item {
   return {
     id: apiItem._id,
     name: apiItem.name,
-    sku: '',
+    sku: apiItem.sku ?? '',
     category: categoryNameById[apiItem.categoryID] ?? 'Uncategorized',
     quantity: apiItem.amount ?? 0,
-    unit: 'units',
+    unit: apiItem.unit ?? 'units',
     min: apiItem.lowStockThreshold ?? 0,
     image: apiItem.pictureURL || undefined,
   }
@@ -180,14 +177,12 @@ function CustomApp() {
         const nameById: Record<string, string> = {}
         fetchedCategories.forEach(c => { idByName[c.name] = c._id; nameById[c._id] = c.name })
         setCategoryIdByName(idByName)
-        if (fetchedCategories.length) {
-          const names = fetchedCategories.map(c => c.name)
-          setBusinessCategories(names)
-          setCategoryInput(names.join(', '))
-        }
-        // otherwise: fresh account, no categories yet -- keep the starter demo
-        // list in the dropdown; ensureCategoryId() below creates real
-        // categories on the backend the first time each one is actually used.
+        // Union with the starter categories rather than replacing them, so an
+        // account that only has a couple of its own categories saved doesn't
+        // lose access to the rest of the starter list in the dropdown.
+        const names = Array.from(new Set([...categories, ...fetchedCategories.map(c => c.name)]))
+        setBusinessCategories(names)
+        setCategoryInput(names.join(', '))
 
         const fetchedItems = await api.fetchItems()
         if (cancelled) return
@@ -242,6 +237,8 @@ function CustomApp() {
       const categoryID = await ensureCategoryId(draft.category)
       const payload: api.NewItemPayload = {
         name: draft.name,
+        sku: draft.sku || undefined,
+        unit: draft.unit || undefined,
         amount: draft.quantity,
         lowStockThreshold: draft.min,
         categoryID,
@@ -253,13 +250,10 @@ function CustomApp() {
 
       if (modal === 'add') {
         const created = await api.addItem(payload)
-        // sku/unit aren't in the backend schema, so they're carried over
-        // from the form directly rather than from the server response --
-        // they'll reset on a page reload until the schema supports them.
-        setItems(current => [...current, { id: created._id, name: created.name, sku: draft.sku, category: draft.category, quantity: created.amount, unit: draft.unit, min: created.lowStockThreshold ?? draft.min, image: created.pictureURL || undefined }])
+        setItems(current => [...current, { id: created._id, name: created.name, sku: created.sku ?? draft.sku, category: draft.category, quantity: created.amount, unit: created.unit ?? draft.unit, min: created.lowStockThreshold ?? draft.min, image: created.pictureURL || undefined }])
       } else if (selectedId) {
         const updated = await api.updateItem(selectedId, payload)
-        setItems(current => current.map(item => item.id === selectedId ? { id: item.id, name: updated.name, sku: draft.sku, category: draft.category, quantity: updated.amount, unit: draft.unit, min: updated.lowStockThreshold ?? draft.min, image: updated.pictureURL || undefined } : item))
+        setItems(current => current.map(item => item.id === selectedId ? { id: item.id, name: updated.name, sku: updated.sku ?? draft.sku, category: draft.category, quantity: updated.amount, unit: updated.unit ?? draft.unit, min: updated.lowStockThreshold ?? draft.min, image: updated.pictureURL || undefined } : item))
       }
       setModal(null)
     } catch (err) {

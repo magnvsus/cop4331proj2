@@ -3,12 +3,14 @@ const Item = require('../models/Item');
 // Create
 exports.createItem = async (req, res) => {
     try{
-        const { name, amount, pictureURL, lowStockThreshold, categoryID } = req.body;
+        const { name, sku, unit, amount, pictureURL, lowStockThreshold, categoryID } = req.body;
 
         const newItem = new Item({
             accountID: req.user.userId,
             categoryID,
             name,
+            sku,
+            unit,
             amount,
             pictureURL,
             lowStockThreshold
