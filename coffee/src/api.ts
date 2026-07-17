@@ -17,6 +17,16 @@ function authHeaders(): HeadersInit {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// Item photos come back from the upload endpoint as a path relative to the
+// API host (e.g. "/uploads/xxx.jpg"), not a full URL -- resolve it against
+// the same host api.ts already talks to. Leaves already-absolute URLs (e.g.
+// the external Unsplash links seed.js uses for demo data) untouched.
+export function resolveImageUrl(pictureURL?: string): string | undefined {
+  if (!pictureURL) return undefined;
+  if (/^(https?:)?\/\//.test(pictureURL) || pictureURL.startsWith('data:')) return pictureURL;
+  return buildPath(pictureURL);
+}
+
 async function handle(res: Response) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -103,6 +113,21 @@ export async function updateItem(id: string, item: Partial<NewItemPayload>): Pro
   });
   const data = await handle(res);
   return data.item ?? data;
+}
+
+// Uploads a photo for compression/storage and returns the relative URL to
+// save as an item's pictureURL. Resolve it for display with resolveImageUrl().
+export async function uploadItemImage(file: Blob): Promise<string> {
+  const formData = new FormData();
+  formData.append('image', file);
+  const res = await fetch(buildPath('/api/items/upload'), {
+    method: 'POST',
+    // No Content-Type header -- the browser sets the multipart boundary itself.
+    headers: { ...authHeaders() },
+    body: formData,
+  });
+  const data = await handle(res);
+  return data.pictureURL;
 }
 
 export async function deleteItem(id: string): Promise<void> {
