@@ -45,7 +45,6 @@ cd ..
 |---|---|
 | `nodemon` *(dev)* | Auto-restarts the backend on file changes (`npm start`) |
 | `jest` *(dev)* | Runs the backend test suite (`npm test`) |
-| `express`, `cors`, `mongodb` | Leftover from early scaffolding — not used by any root-level code (the actual server lives in `backend/`, which has its own copies) |
 
 **`backend/`** — the Express API:
 | Package | Purpose |
@@ -61,13 +60,12 @@ cd ..
 | Package | Purpose |
 |---|---|
 | `react`, `react-dom` | UI framework |
-| `react-router-dom` | Client-side routing |
 | `vite` *(dev)* | Dev server / build tool |
 | `@vitejs/plugin-react` *(dev)* | React support for Vite |
 | `typescript` *(dev)* | Type checking (`tsc -b`) |
 | `vitest` *(dev)* | Frontend test runner |
 | `oxlint` *(dev)* | Linting |
-| `@types/react`, `@types/react-dom`, `@types/node` *(dev)* | Type declarations |
+| `@types/react`, `@types/react-dom`, `@types/node` *(dev)* | Type declarations (`@types/node` is needed for type-checking `vite.config.ts`) |
 
 ## Environment variables
 
