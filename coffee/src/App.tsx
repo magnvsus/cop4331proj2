@@ -206,6 +206,13 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  const [showRegister, setShowRegister] = useState(false)
+  const [regEmail, setRegEmail] = useState('')
+  const [regPassword, setRegPassword] = useState('')
+  const [regConfirmPassword, setRegConfirmPassword] = useState('')
+  const [regError, setRegError] = useState('')
+  const [regSubmitting, setRegSubmitting] = useState(false)
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
@@ -216,6 +223,36 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
       setError(err instanceof Error ? err.message : 'Login failed')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const closeRegister = () => {
+    setShowRegister(false)
+    setRegEmail('')
+    setRegPassword('')
+    setRegConfirmPassword('')
+    setRegError('')
+  }
+
+  // Registers the account, then immediately signs in with the same
+  // credentials -- api.register() only confirms the account was created, it
+  // doesn't log the user in on its own.
+  const handleRegister = async (event: FormEvent) => {
+    event.preventDefault()
+    setRegError('')
+    if (regPassword !== regConfirmPassword) {
+      setRegError('Passwords do not match')
+      return
+    }
+    setRegSubmitting(true)
+    try {
+      await api.register(regEmail, regPassword)
+      await onLogin(regEmail, regPassword)
+      closeRegister()
+    } catch (err) {
+      setRegError(err instanceof Error ? err.message : 'Could not create account')
+    } finally {
+      setRegSubmitting(false)
     }
   }
 
@@ -300,6 +337,13 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
                 </>
               )}
             </button>
+            <button
+              type="button"
+              className="secondary login-button"
+              onClick={() => setShowRegister(true)}
+            >
+              Create an account
+            </button>
           </form>
           <p className="demo-note">
             <span>●</span> Sign in with your Inventory Hub account
@@ -307,6 +351,69 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
         </div>
         <p className="copyright">© 2026 Inventory Hub · Coffee Hour Demo</p>
       </section>
+      {showRegister && (
+        <div className="modal-backdrop" onMouseDown={closeRegister}>
+          <form
+            className="modal"
+            onSubmit={handleRegister}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="modal-head">
+              <div>
+                <span className="eyebrow">NEW ACCOUNT</span>
+                <h2>Create an account</h2>
+              </div>
+              <button type="button" onClick={closeRegister}>
+                ×
+              </button>
+            </div>
+            <label>
+              Email address
+              <input
+                type="email"
+                placeholder="you@coffeehour.com"
+                value={regEmail}
+                onChange={(e) => setRegEmail(e.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                value={regPassword}
+                onChange={(e) => setRegPassword(e.target.value)}
+                minLength={6}
+                required
+              />
+              <small className="field-help">At least 6 characters.</small>
+            </label>
+            <label>
+              Confirm password
+              <input
+                type="password"
+                value={regConfirmPassword}
+                onChange={(e) => setRegConfirmPassword(e.target.value)}
+                minLength={6}
+                required
+              />
+            </label>
+            {regError && (
+              <p className="field-help" style={{ color: '#a33b31' }}>
+                {regError}
+              </p>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={closeRegister}>
+                Cancel
+              </button>
+              <button className="primary" type="submit" disabled={regSubmitting}>
+                {regSubmitting ? 'Creating account…' : 'Create account'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </main>
   )
 }
@@ -337,6 +444,23 @@ function App() {
   const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  // Raw pictureURL-style value from the server, resolved to a displayable
+  // URL only at render time -- same reasoning as Item.image (see
+  // normalizeItem above): keeps whatever we send back to the server on
+  // change as the real relative path, not an absolute URL.
+  const [bannerImage, setBannerImage] = useState<string | undefined>(undefined)
+  const [uploadingBanner, setUploadingBanner] = useState(false)
+  const [showBannerModal, setShowBannerModal] = useState(false)
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false)
+  const [deletingAccount, setDeletingAccount] = useState(false)
+  // Whether the heading/eyebrow/subtitle text renders over the banner --
+  // just a display preference, not persisted anywhere, so it resets to
+  // shown on reload.
+  const [showHeaderText, setShowHeaderText] = useState(true)
+  // Whichever of white/black actually has better contrast against the
+  // current banner image, computed below. Defaults to white to match the
+  // page's look with no banner set.
+  const [bannerTextColor, setBannerTextColor] = useState<'white' | 'black'>('white')
   // A photo the user just picked but hasn't saved yet -- held locally and
   // only actually uploaded on submit, so cancelling the modal never leaves
   // an orphaned file on the server.
@@ -353,6 +477,51 @@ function App() {
       if (pendingPhotoPreview) URL.revokeObjectURL(pendingPhotoPreview)
     }
   }, [pendingPhotoPreview])
+
+  // Picks whichever of white/black text has better contrast against the
+  // banner, by drawing it into an offscreen canvas and averaging pixel
+  // brightness. crossOrigin is required to read pixels back out of the
+  // canvas at all when the image is served from a different origin (e.g.
+  // the Android app's https://localhost origin loading the image from the
+  // real API domain) -- if the server hasn't sent the right CORS header for
+  // that, reading the canvas throws a SecurityError, which is caught below
+  // and just falls back to white rather than breaking the page.
+  useEffect(() => {
+    const resolvedUrl = api.resolveImageUrl(bannerImage)
+    if (!resolvedUrl) {
+      setBannerTextColor('white')
+      return
+    }
+    let cancelled = false
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      if (cancelled) return
+      try {
+        const size = 32
+        const canvas = document.createElement('canvas')
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
+        ctx.drawImage(img, 0, 0, size, size)
+        const { data } = ctx.getImageData(0, 0, size, size)
+        let total = 0
+        for (let i = 0; i < data.length; i += 4) {
+          total += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+        }
+        const averageBrightness = total / (data.length / 4)
+        setBannerTextColor(averageBrightness > 140 ? 'black' : 'white')
+      } catch {
+        setBannerTextColor('white')
+      }
+    }
+    img.onerror = () => setBannerTextColor('white')
+    img.src = resolvedUrl
+    return () => {
+      cancelled = true
+    }
+  }, [bannerImage])
 
   // ---------------- Data loading ----------------
   // Load categories first, then items -- items only store a categoryID, so we
@@ -425,6 +594,7 @@ function App() {
       .replace(/[._-]+/g, ' ')
       .replace(/\b\w/g, (c) => c.toUpperCase())
     setCompany((current) => ({ ...current, manager: displayName || current.manager }))
+    setBannerImage(user.bannerImage || undefined)
     setLoggedIn(true)
   }
 
@@ -433,6 +603,52 @@ function App() {
     setLoggedIn(false)
     setItems([])
     setPage('dashboard')
+    setBannerImage(undefined)
+  }
+
+  const handleDeleteAccount = async () => {
+    setLoadError('')
+    setDeletingAccount(true)
+    try {
+      await api.deleteAccount()
+      setShowDeleteAccountModal(false)
+      handleLogout()
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not delete account')
+    } finally {
+      setDeletingAccount(false)
+    }
+  }
+
+  // Uploads immediately (unlike item photos, there's no surrounding form/
+  // submit step here -- picking a new banner is the entire action) and
+  // saves it to the account right away.
+  const changeBanner = async (file?: File) => {
+    if (!file) return
+    setLoadError('')
+    setUploadingBanner(true)
+    try {
+      const pictureURL = await api.uploadItemImage(file)
+      const user = await api.updateBanner(pictureURL)
+      setBannerImage(user.bannerImage || undefined)
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not update banner')
+    } finally {
+      setUploadingBanner(false)
+    }
+  }
+
+  const removeBanner = async () => {
+    setLoadError('')
+    setUploadingBanner(true)
+    try {
+      const user = await api.updateBanner('')
+      setBannerImage(user.bannerImage || undefined)
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not remove banner')
+    } finally {
+      setUploadingBanner(false)
+    }
   }
 
   const openAdd = () => {
@@ -684,6 +900,9 @@ function App() {
               <option key={option}>{option}</option>
             ))}
           </select>
+          <button className="primary" onClick={openAdd}>
+            <Icon name="plus" /> Add item
+          </button>
         </div>
       </div>
       <div className="table-wrap">
@@ -808,7 +1027,7 @@ function App() {
             className={page === 'settings' ? 'active' : ''}
             onClick={() => setPage('settings')}
           >
-            <Icon name="edit" /> Customize
+            <Icon name="edit" /> Settings
           </button>
         </nav>
         <div className="sidebar-bottom">
@@ -823,30 +1042,50 @@ function App() {
         </div>
       </aside>
       <main className="dashboard">
-        <header>
-          <div>
-            <span className="eyebrow">{company.name.toUpperCase()} · INVENTORY HUB</span>
-            <h1>
-              {page === 'dashboard'
-                ? `Good morning, ${company.manager.split(' ')[0]}.`
-                : page === 'inventory'
-                  ? 'Inventory'
-                  : page === 'low'
-                    ? 'Low-stock alerts'
-                    : 'Customize your workspace'}
-            </h1>
-            <p>
-              {page === 'settings'
-                ? 'Adapt Inventory Hub to match any business or brand.'
-                : `Manage inventory for your ${company.type.toLowerCase()}.`}
-            </p>
-          </div>
-          {page !== 'settings' && (
-            <button className="primary" onClick={openAdd}>
-              <Icon name="plus" /> Add item
-            </button>
+        <div
+          className={bannerImage ? 'page-banner has-image' : 'page-banner'}
+          style={
+            bannerImage
+              ? ({
+                  '--banner-text-color': bannerTextColor === 'black' ? '#1a1310' : '#fff',
+                } as React.CSSProperties)
+              : undefined
+          }
+        >
+          {bannerImage && (
+            <img className="page-banner-image" src={api.resolveImageUrl(bannerImage)} alt="" />
           )}
-        </header>
+          <header>
+            {showHeaderText && (
+              <div>
+                <span className="eyebrow">{company.name.toUpperCase()} · INVENTORY HUB</span>
+                <h1>
+                  {page === 'dashboard'
+                    ? `Good morning, ${company.manager.split(' ')[0]}.`
+                    : page === 'inventory'
+                      ? 'Inventory'
+                      : page === 'low'
+                        ? 'Low-stock alerts'
+                        : 'Customize your workspace'}
+                </h1>
+                <p>
+                  {page === 'settings'
+                    ? 'Adapt Inventory Hub to match any business or brand.'
+                    : `Manage inventory for your ${company.type.toLowerCase()}.`}
+                </p>
+              </div>
+            )}
+            {page !== 'settings' && (
+              <button
+                type="button"
+                className="banner-button"
+                onClick={() => setShowBannerModal(true)}
+              >
+                <Icon name="edit" /> Customize
+              </button>
+            )}
+          </header>
+        </div>
         {loadError && (
           <div className="alert-banner">
             <span>
@@ -1009,6 +1248,28 @@ function App() {
                 }}
               >
                 Restore demo branding
+              </button>
+            </div>
+            <div className="settings-card danger-zone">
+              <div className="settings-title">
+                <span className="settings-symbol">
+                  <Icon name="trash" />
+                </span>
+                <div>
+                  <h2>Danger zone</h2>
+                  <p>Permanently delete your account and all of its data.</p>
+                </div>
+              </div>
+              <p className="field-help">
+                This removes your account, every item, every category, and any uploaded photos. This
+                action cannot be undone.
+              </p>
+              <button
+                type="button"
+                className="danger full-button"
+                onClick={() => setShowDeleteAccountModal(true)}
+              >
+                Delete account
               </button>
             </div>
           </section>
@@ -1200,6 +1461,103 @@ function App() {
               </button>
               <button className="danger" onClick={confirmDelete}>
                 Delete item
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showBannerModal && (
+        <div className="modal-backdrop" onMouseDown={() => setShowBannerModal(false)}>
+          <div className="modal" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <span className="eyebrow">PAGE BANNER</span>
+                <h2>Customize banner</h2>
+              </div>
+              <button type="button" onClick={() => setShowBannerModal(false)}>
+                ×
+              </button>
+            </div>
+            <div className="photo-field">
+              <div className="photo-preview">
+                {bannerImage ? (
+                  <img src={api.resolveImageUrl(bannerImage)} alt="Banner preview" />
+                ) : (
+                  <>
+                    <Icon name="box" />
+                    <span>No banner</span>
+                  </>
+                )}
+              </div>
+              <div>
+                <strong>Banner image</strong>
+                <p>Shown behind the page heading.</p>
+                <label className="photo-button" aria-disabled={uploadingBanner}>
+                  {uploadingBanner ? 'Uploading…' : 'Choose photo'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={uploadingBanner}
+                    onChange={(event) => changeBanner(event.target.files?.[0])}
+                  />
+                </label>
+                {bannerImage && (
+                  <button
+                    type="button"
+                    className="remove-photo"
+                    disabled={uploadingBanner}
+                    onClick={removeBanner}
+                  >
+                    Remove banner
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="settings-toggle-row">
+              <div>
+                <strong>Header text</strong>
+                <p>Show the page heading and subtitle over the banner.</p>
+              </div>
+              <button
+                type="button"
+                className={showHeaderText ? 'toggle-switch on' : 'toggle-switch'}
+                role="switch"
+                aria-checked={showHeaderText}
+                aria-label="Toggle header text"
+                onClick={() => setShowHeaderText((current) => !current)}
+              >
+                <span />
+              </button>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="primary" onClick={() => setShowBannerModal(false)}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showDeleteAccountModal && (
+        <div className="modal-backdrop">
+          <div className="modal delete-modal">
+            <span className="delete-icon">
+              <Icon name="trash" />
+            </span>
+            <h2>Delete your account?</h2>
+            <p>
+              This permanently removes your account, every inventory item, every category, and any
+              uploaded photos. This action cannot be undone.
+            </p>
+            <div className="modal-actions">
+              <button
+                className="secondary"
+                disabled={deletingAccount}
+                onClick={() => setShowDeleteAccountModal(false)}
+              >
+                Cancel
+              </button>
+              <button className="danger" disabled={deletingAccount} onClick={handleDeleteAccount}>
+                {deletingAccount ? 'Deleting…' : 'Delete account'}
               </button>
             </div>
           </div>

@@ -1,12 +1,22 @@
 const User = require('../models/User');
+const Item = require('../models/Item');
+const Category = require('../models/Category');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { deleteLocalUpload } = require('../utils/localUploads');
 
 
 // REGISTER
 exports.register = async (req, res) => {
     try {
         const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email and password are required' });
+        }
+        if (password.length < 6) {
+            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+        }
 
         //check if a user is already created
         const existingUser = await User.findOne({ email });
@@ -70,5 +80,70 @@ exports.login = async (req, res) => {
 
     } catch (error) {
         res.status(500).json({ error: 'Server error during login', details: error.message});
+    }
+};
+
+// UPDATE BANNER
+exports.updateBanner = async (req, res) => {
+    try {
+        const { bannerImage } = req.body;
+        const userId = req.user.userId;
+
+        const previousUser = await User.findById(userId);
+        if (!previousUser) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            { bannerImage },
+            { new: true, runValidators: true }
+        );
+
+        // If this replaced an existing banner, clean up the old upload so it
+        // doesn't sit around on disk forever.
+        if (bannerImage !== previousUser.bannerImage) {
+            await deleteLocalUpload(previousUser.bannerImage);
+        }
+
+        res.status(200).json({
+            user: {
+                id: updatedUser._id,
+                email: updatedUser.email,
+                isVerified: updatedUser.isVerified,
+                bannerImage: updatedUser.bannerImage || ''
+            },
+            error: ''
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to update banner', details: error.message});
+    }
+};
+
+// DELETE ACCOUNT
+exports.deleteAccount = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // Clean up everything tied to this account first, so deleting it
+        // doesn't leave orphaned items, categories, or uploaded files behind.
+        const items = await Item.find({ accountID: userId });
+        for (const item of items) {
+            await deleteLocalUpload(item.pictureURL);
+        }
+        await Item.deleteMany({ accountID: userId });
+        await Category.deleteMany({ accountID: userId });
+        await deleteLocalUpload(user.bannerImage);
+
+        await User.findByIdAndDelete(userId);
+
+        res.status(200).json({ message: 'Account deleted successfully', error: '' });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to delete account', details: error.message});
     }
 };
