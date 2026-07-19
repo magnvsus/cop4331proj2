@@ -13,6 +13,8 @@ const itemSchema = new mongoose.Schema({
         required: false
     },
     name: { type: String, required: true, trim: true },
+    sku: { type: String, trim: true },
+    unit: { type: String, trim: true, default: 'units' },
     amount: { type: Number, default: 0, min: 0 },
     pictureURL: { type: String },
     lowStockThreshold: { type: Number, default: 5, min: 0}
