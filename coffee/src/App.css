@@ -82,6 +82,17 @@
   font-size: 10px;
   padding: 2px 7px;
 }
+.mobile-nav-toggle {
+  display: none;
+  border: 0;
+  background: transparent;
+  color: #f9f3e9;
+  padding: 8px;
+  border-radius: 8px;
+}
+.mobile-logout-btn {
+  display: none;
+}
 .sidebar-bottom {
   margin-top: auto;
   border-top: 1px solid #4b3a2f;
@@ -896,7 +907,7 @@ tbody tr:hover {
 }
 @media (max-width: 600px) {
   .sidebar {
-    position: static;
+    position: relative;
     width: 100%;
     height: 66px;
     flex-direction: row;
@@ -906,15 +917,42 @@ tbody tr:hover {
   .sidebar .brand > span:last-child {
     display: block;
   }
+  .mobile-nav-toggle {
+    display: block;
+    margin-left: auto;
+  }
   .sidebar nav {
-    margin: 0 0 0 auto;
+    margin: 0;
     flex-direction: row;
   }
   .sidebar nav button {
     display: none;
   }
-  .sidebar nav button.active {
+  .sidebar nav.nav-open {
+    position: absolute;
+    top: 66px;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    align-items: stretch;
+    background: #30241c;
+    padding: 8px;
+    gap: 4px;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.25);
+    z-index: 6;
+  }
+  .sidebar nav.nav-open button {
     display: flex;
+    justify-content: flex-start;
+    font-size: 14px;
+  }
+  .sidebar nav.nav-open b {
+    display: inline-block;
+  }
+  .sidebar nav.nav-open .mobile-logout-btn {
+    border-top: 1px solid #4b3a2f;
+    margin-top: 4px;
+    padding-top: 16px;
   }
   .sidebar-bottom {
     display: none;
@@ -941,6 +979,7 @@ tbody tr:hover {
   }
   .tools {
     flex-direction: column;
+    align-items: flex-start;
   }
   .tools select {
     width: 100%;
@@ -1094,6 +1133,7 @@ tbody tr:hover {
 .scan-button .icon {
   width: 18px;
   height: 18px;
+}
 .settings-toggle-row {
   display: flex;
   align-items: center;
@@ -1287,20 +1327,8 @@ tbody tr:hover {
   .settings-grid {
     grid-template-columns: 1fr;
   }
-  .sidebar nav button {
-    font-size: 0;
-  }
-  .sidebar nav button.active {
-    font-size: 0;
-  }
 }
 @media (max-width: 600px) {
-  .sidebar nav button.active {
-    display: flex;
-  }
-  .sidebar nav button.active .icon {
-    width: 19px;
-  }
   .settings-card {
     padding: 18px;
   }

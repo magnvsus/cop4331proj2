@@ -107,6 +107,7 @@ function Icon({
     | 'camera'
     | 'gallery'
     | 'scan'
+    | 'menu'
 }) {
   const paths: Record<string, React.ReactNode> = {
     grid: (
@@ -181,6 +182,11 @@ function Icon({
       <>
         <path d="M3 7V4a1 1 0 0 1 1-1h3M17 3h3a1 1 0 0 1 1 1v3M21 17v3a1 1 0 0 1-1 1h-3M7 21H4a1 1 0 0 1-1-1v-3" />
         <path d="M7 12h10" />
+      </>
+    ),
+    menu: (
+      <>
+        <path d="M4 7h16M4 12h16M4 17h16" />
       </>
     ),
   }
@@ -453,6 +459,11 @@ function App() {
   const [showBannerModal, setShowBannerModal] = useState(false)
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false)
   const [deletingAccount, setDeletingAccount] = useState(false)
+  // On narrow/phone-width screens the sidebar collapses to a top bar that
+  // only has room for the active nav button -- this drives a dropdown to
+  // reach the others. Irrelevant at desktop widths, where all buttons are
+  // already visible via CSS regardless of this value.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   // Whether the heading/eyebrow/subtitle text renders over the banner --
   // just a display preference, not persisted anywhere, so it resets to
   // shown on reload.
@@ -1007,27 +1018,53 @@ function App() {
             Inventory Hub<small>{company.name.toUpperCase()}</small>
           </span>
         </div>
-        <nav>
+        <button
+          className="mobile-nav-toggle"
+          aria-label="Toggle navigation menu"
+          aria-expanded={mobileNavOpen}
+          onClick={() => setMobileNavOpen((open) => !open)}
+        >
+          <Icon name="menu" />
+        </button>
+        <nav className={mobileNavOpen ? 'nav-open' : ''}>
           <button
             className={page === 'dashboard' ? 'active' : ''}
-            onClick={() => setPage('dashboard')}
+            onClick={() => {
+              setPage('dashboard')
+              setMobileNavOpen(false)
+            }}
           >
             <Icon name="grid" /> Dashboard
           </button>
           <button
             className={page === 'inventory' ? 'active' : ''}
-            onClick={() => setPage('inventory')}
+            onClick={() => {
+              setPage('inventory')
+              setMobileNavOpen(false)
+            }}
           >
             <Icon name="box" /> Inventory
           </button>
-          <button className={page === 'low' ? 'active' : ''} onClick={() => setPage('low')}>
+          <button
+            className={page === 'low' ? 'active' : ''}
+            onClick={() => {
+              setPage('low')
+              setMobileNavOpen(false)
+            }}
+          >
             <Icon name="alert" /> Low stock <b>{lowItems.length}</b>
           </button>
           <button
             className={page === 'settings' ? 'active' : ''}
-            onClick={() => setPage('settings')}
+            onClick={() => {
+              setPage('settings')
+              setMobileNavOpen(false)
+            }}
           >
             <Icon name="edit" /> Settings
+          </button>
+          <button className="mobile-logout-btn" onClick={handleLogout}>
+            <Icon name="logout" /> Log out
           </button>
         </nav>
         <div className="sidebar-bottom">
