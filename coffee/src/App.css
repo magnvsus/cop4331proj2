@@ -125,6 +125,60 @@
   padding: 45px 4.5%;
   max-width: 1600px;
 }
+.page-banner {
+  position: relative;
+}
+.page-banner.has-image {
+  border-radius: 14px;
+  overflow: hidden;
+  padding: 20px 24px;
+  margin-bottom: 28px;
+}
+.page-banner.has-image header {
+  margin-bottom: 0;
+}
+.page-banner-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+.page-banner.has-image header,
+.page-banner .banner-button {
+  position: relative;
+  z-index: 1;
+}
+/* Text color adapts between white/black based on the banner's brightness --
+   see the bannerTextColor effect in App.tsx. Falls back to white so it's
+   still readable if that computation hasn't run yet (e.g. still loading). */
+.page-banner.has-image .eyebrow,
+.page-banner.has-image h1,
+.page-banner.has-image header p {
+  color: var(--banner-text-color, #fff);
+}
+.banner-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d8d1c9;
+  border-radius: 7px;
+  padding: 7px 11px;
+  background: #fff;
+  color: #62574e;
+  font-size: 10px;
+  cursor: pointer;
+}
+.banner-button .icon {
+  width: 14px;
+  height: 14px;
+}
+.page-banner.has-image .banner-button {
+  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+}
 .dashboard header {
   display: flex;
   align-items: flex-end;
@@ -275,7 +329,12 @@
 }
 .tools {
   display: flex;
+  align-items: center;
   gap: 9px;
+}
+.tools .primary {
+  height: 35px;
+  padding: 0 15px;
 }
 .search {
   position: relative;
@@ -973,6 +1032,50 @@ tbody tr:hover {
   color: #a33b31;
   font-size: 10px;
   margin-left: 8px;
+}
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 18px;
+  margin-top: 18px;
+  border-top: 1px solid #eee8e1;
+}
+.settings-toggle-row strong {
+  display: block;
+  font-size: 12px;
+}
+.settings-toggle-row p {
+  margin: 3px 0 0;
+  font-size: 10px;
+  color: #8e857e;
+}
+.toggle-switch {
+  flex: none;
+  display: flex;
+  align-items: center;
+  width: 40px;
+  height: 23px;
+  border: 0;
+  border-radius: 20px;
+  background: #ded9d2;
+  padding: 2px;
+  cursor: pointer;
+}
+.toggle-switch span {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+}
+.toggle-switch.on {
+  background: #a9642e;
+}
+.toggle-switch.on span {
+  transform: translateX(17px);
 }
 
 /* Settings / customize page */

@@ -2,6 +2,7 @@ process.env.JWT_SECRET = 'test-secret';
 
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const fs = require('fs/promises');
 const User = require('../models/User');
 const authController = require('./authController');
 const { mockRequest, mockResponse } = require('../testUtils/expressMocks');
@@ -9,6 +10,7 @@ const { mockRequest, mockResponse } = require('../testUtils/expressMocks');
 jest.mock('../models/User');
 jest.mock('bcryptjs');
 jest.mock('jsonwebtoken');
+jest.mock('fs/promises');
 
 describe('authController.register', () => {
   it('rejects registration when the email is already taken', async () => {
@@ -131,6 +133,92 @@ describe('authController.login', () => {
     const res = mockResponse();
 
     await authController.login(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
+});
+
+describe('authController.updateBanner', () => {
+  beforeEach(() => {
+    fs.unlink.mockResolvedValue(undefined);
+  });
+
+  it('returns 404 when the user does not exist', async () => {
+    User.findById.mockResolvedValue(null);
+    const req = mockRequest({ body: { bannerImage: '/uploads/new.jpg' }, user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.updateBanner(req, res);
+
+    expect(User.findById).toHaveBeenCalledWith('u1');
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it('updates the banner and returns the user on success', async () => {
+    User.findById.mockResolvedValue({ _id: 'u1', bannerImage: '' });
+    User.findByIdAndUpdate.mockResolvedValue({
+      _id: 'u1',
+      email: 'user@example.com',
+      isVerified: true,
+      bannerImage: '/uploads/new.jpg',
+    });
+    const req = mockRequest({ body: { bannerImage: '/uploads/new.jpg' }, user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.updateBanner(req, res);
+
+    expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+      'u1',
+      { bannerImage: '/uploads/new.jpg' },
+      { new: true, runValidators: true }
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      user: { id: 'u1', email: 'user@example.com', isVerified: true, bannerImage: '/uploads/new.jpg' },
+      error: '',
+    });
+  });
+
+  it('deletes the old banner file when it is replaced by a new one', async () => {
+    User.findById.mockResolvedValue({ _id: 'u1', bannerImage: '/uploads/old.jpg' });
+    User.findByIdAndUpdate.mockResolvedValue({
+      _id: 'u1',
+      email: 'user@example.com',
+      isVerified: true,
+      bannerImage: '/uploads/new.jpg',
+    });
+    const req = mockRequest({ body: { bannerImage: '/uploads/new.jpg' }, user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.updateBanner(req, res);
+
+    expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining('old.jpg'));
+  });
+
+  it('does not delete an external bannerImage (e.g. a manually-set URL)', async () => {
+    User.findById.mockResolvedValue({ _id: 'u1', bannerImage: 'https://images.unsplash.com/photo.jpg' });
+    User.findByIdAndUpdate.mockResolvedValue({
+      _id: 'u1',
+      email: 'user@example.com',
+      isVerified: true,
+      bannerImage: '/uploads/new.jpg',
+    });
+    const req = mockRequest({ body: { bannerImage: '/uploads/new.jpg' }, user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.updateBanner(req, res);
+
+    expect(fs.unlink).not.toHaveBeenCalled();
+  });
+
+  it('returns a 500 when the update fails', async () => {
+    User.findById.mockResolvedValue({ _id: 'u1', bannerImage: '' });
+    User.findByIdAndUpdate.mockRejectedValue(new Error('db down'));
+    const req = mockRequest({ body: { bannerImage: '/uploads/new.jpg' }, user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.updateBanner(req, res);
 
     expect(res.status).toHaveBeenCalledWith(500);
   });

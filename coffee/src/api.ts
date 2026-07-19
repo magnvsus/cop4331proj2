@@ -60,6 +60,19 @@ export async function login(email: string, password: string): Promise<{ token: s
   return handle(res);
 }
 
+// bannerImage should be the relative path returned by uploadItemImage() --
+// that upload endpoint isn't actually item-specific, just a generic
+// compress-and-store-an-image endpoint, so it's reused here as-is.
+export async function updateBanner(bannerImage: string): Promise<AuthUser> {
+  const res = await fetch(buildPath('/api/auth/banner'), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ bannerImage }),
+  });
+  const data = await handle(res);
+  return data.user ?? data;
+}
+
 // ---------------- Items ----------------
 // Matches your Item schema: name, sku, unit, amount, categoryID, pictureURL, lowStockThreshold
 

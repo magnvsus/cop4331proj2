@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { deleteLocalUpload } = require('../utils/localUploads');
 
 
 // REGISTER
@@ -70,5 +71,42 @@ exports.login = async (req, res) => {
 
     } catch (error) {
         res.status(500).json({ error: 'Server error during login', details: error.message});
+    }
+};
+
+// UPDATE BANNER
+exports.updateBanner = async (req, res) => {
+    try {
+        const { bannerImage } = req.body;
+        const userId = req.user.userId;
+
+        const previousUser = await User.findById(userId);
+        if (!previousUser) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            { bannerImage },
+            { new: true, runValidators: true }
+        );
+
+        // If this replaced an existing banner, clean up the old upload so it
+        // doesn't sit around on disk forever.
+        if (bannerImage !== previousUser.bannerImage) {
+            await deleteLocalUpload(previousUser.bannerImage);
+        }
+
+        res.status(200).json({
+            user: {
+                id: updatedUser._id,
+                email: updatedUser.email,
+                isVerified: updatedUser.isVerified,
+                bannerImage: updatedUser.bannerImage || ''
+            },
+            error: ''
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to update banner', details: error.message});
     }
 };
