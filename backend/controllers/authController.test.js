@@ -13,6 +13,28 @@ jest.mock('jsonwebtoken');
 jest.mock('fs/promises');
 
 describe('authController.register', () => {
+  it('rejects registration with a missing email or password', async () => {
+    const req = mockRequest({ body: { email: '', password: 'secret' } });
+    const res = mockResponse();
+
+    await authController.register(req, res);
+
+    expect(User.findOne).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Email and password are required' });
+  });
+
+  it('rejects a password shorter than 6 characters', async () => {
+    const req = mockRequest({ body: { email: 'new@example.com', password: 'short' } });
+    const res = mockResponse();
+
+    await authController.register(req, res);
+
+    expect(User.findOne).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Password must be at least 6 characters' });
+  });
+
   it('rejects registration when the email is already taken', async () => {
     User.findOne.mockResolvedValue({ _id: 'existing-id' });
     const req = mockRequest({ body: { email: 'taken@example.com', password: 'secret' } });
@@ -48,7 +70,7 @@ describe('authController.register', () => {
 
   it('returns a 500 when something unexpected fails', async () => {
     User.findOne.mockRejectedValue(new Error('db down'));
-    const req = mockRequest({ body: { email: 'x@example.com', password: 'pw' } });
+    const req = mockRequest({ body: { email: 'x@example.com', password: 'long-enough' } });
     const res = mockResponse();
 
     await authController.register(req, res);

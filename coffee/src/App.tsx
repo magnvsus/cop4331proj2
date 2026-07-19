@@ -157,6 +157,13 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  const [showRegister, setShowRegister] = useState(false)
+  const [regEmail, setRegEmail] = useState('')
+  const [regPassword, setRegPassword] = useState('')
+  const [regConfirmPassword, setRegConfirmPassword] = useState('')
+  const [regError, setRegError] = useState('')
+  const [regSubmitting, setRegSubmitting] = useState(false)
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
@@ -167,6 +174,36 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
       setError(err instanceof Error ? err.message : 'Login failed')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const closeRegister = () => {
+    setShowRegister(false)
+    setRegEmail('')
+    setRegPassword('')
+    setRegConfirmPassword('')
+    setRegError('')
+  }
+
+  // Registers the account, then immediately signs in with the same
+  // credentials -- api.register() only confirms the account was created, it
+  // doesn't log the user in on its own.
+  const handleRegister = async (event: FormEvent) => {
+    event.preventDefault()
+    setRegError('')
+    if (regPassword !== regConfirmPassword) {
+      setRegError('Passwords do not match')
+      return
+    }
+    setRegSubmitting(true)
+    try {
+      await api.register(regEmail, regPassword)
+      await onLogin(regEmail, regPassword)
+      closeRegister()
+    } catch (err) {
+      setRegError(err instanceof Error ? err.message : 'Could not create account')
+    } finally {
+      setRegSubmitting(false)
     }
   }
 
@@ -251,6 +288,13 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
                 </>
               )}
             </button>
+            <button
+              type="button"
+              className="secondary login-button"
+              onClick={() => setShowRegister(true)}
+            >
+              Create an account
+            </button>
           </form>
           <p className="demo-note">
             <span>●</span> Sign in with your Inventory Hub account
@@ -258,6 +302,69 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
         </div>
         <p className="copyright">© 2026 Inventory Hub · Coffee Hour Demo</p>
       </section>
+      {showRegister && (
+        <div className="modal-backdrop" onMouseDown={closeRegister}>
+          <form
+            className="modal"
+            onSubmit={handleRegister}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="modal-head">
+              <div>
+                <span className="eyebrow">NEW ACCOUNT</span>
+                <h2>Create an account</h2>
+              </div>
+              <button type="button" onClick={closeRegister}>
+                ×
+              </button>
+            </div>
+            <label>
+              Email address
+              <input
+                type="email"
+                placeholder="you@coffeehour.com"
+                value={regEmail}
+                onChange={(e) => setRegEmail(e.target.value)}
+                required
+              />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                value={regPassword}
+                onChange={(e) => setRegPassword(e.target.value)}
+                minLength={6}
+                required
+              />
+              <small className="field-help">At least 6 characters.</small>
+            </label>
+            <label>
+              Confirm password
+              <input
+                type="password"
+                value={regConfirmPassword}
+                onChange={(e) => setRegConfirmPassword(e.target.value)}
+                minLength={6}
+                required
+              />
+            </label>
+            {regError && (
+              <p className="field-help" style={{ color: '#a33b31' }}>
+                {regError}
+              </p>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={closeRegister}>
+                Cancel
+              </button>
+              <button className="primary" type="submit" disabled={regSubmitting}>
+                {regSubmitting ? 'Creating account…' : 'Create account'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </main>
   )
 }
