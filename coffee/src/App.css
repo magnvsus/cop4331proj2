@@ -677,6 +677,9 @@ tbody tr:hover {
   justify-content: space-between;
   padding-inline: 18px;
 }
+.login-button + .login-button {
+  margin-top: 10px;
+}
 .demo-note {
   text-align: center;
   background: #faf6ef;
@@ -1092,6 +1095,16 @@ tbody tr:hover {
   border-radius: 12px;
   padding: 24px;
   box-shadow: 0 3px 16px #33231508;
+}
+.danger-zone {
+  border-color: #f0d5d0;
+}
+.danger-zone .settings-symbol {
+  background: #fae8e5;
+  color: #a33b31;
+}
+.danger-zone > .field-help {
+  margin-bottom: 16px;
 }
 .settings-title {
   display: flex;

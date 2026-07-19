@@ -13,5 +13,8 @@ router.post('/login', authController.login);
 // Update Banner Route
 router.patch('/banner', protect, authController.updateBanner);
 
+// Delete Account Route
+router.delete('/account', protect, authController.deleteAccount);
+
 // export so that server.js can import
 module.exports = router;

@@ -4,10 +4,14 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const fs = require('fs/promises');
 const User = require('../models/User');
+const Item = require('../models/Item');
+const Category = require('../models/Category');
 const authController = require('./authController');
 const { mockRequest, mockResponse } = require('../testUtils/expressMocks');
 
 jest.mock('../models/User');
+jest.mock('../models/Item');
+jest.mock('../models/Category');
 jest.mock('bcryptjs');
 jest.mock('jsonwebtoken');
 jest.mock('fs/promises');
@@ -241,6 +245,68 @@ describe('authController.updateBanner', () => {
     const res = mockResponse();
 
     await authController.updateBanner(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
+});
+
+describe('authController.deleteAccount', () => {
+  beforeEach(() => {
+    fs.unlink.mockResolvedValue(undefined);
+    Item.find.mockResolvedValue([]);
+    Item.deleteMany.mockResolvedValue({});
+    Category.deleteMany.mockResolvedValue({});
+    User.findByIdAndDelete.mockResolvedValue({});
+  });
+
+  it('returns 404 when the user does not exist', async () => {
+    User.findById.mockResolvedValue(null);
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.deleteAccount(req, res);
+
+    expect(User.findByIdAndDelete).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it('deletes the account, its items and categories, and returns success', async () => {
+    User.findById.mockResolvedValue({ _id: 'u1', bannerImage: '' });
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.deleteAccount(req, res);
+
+    expect(Item.deleteMany).toHaveBeenCalledWith({ accountID: 'u1' });
+    expect(Category.deleteMany).toHaveBeenCalledWith({ accountID: 'u1' });
+    expect(User.findByIdAndDelete).toHaveBeenCalledWith('u1');
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({ message: 'Account deleted successfully', error: '' });
+  });
+
+  it("cleans up the account's uploaded item photos and banner image", async () => {
+    User.findById.mockResolvedValue({ _id: 'u1', bannerImage: '/uploads/banner.jpg' });
+    Item.find.mockResolvedValue([
+      { pictureURL: '/uploads/item1.jpg' },
+      { pictureURL: '/uploads/item2.jpg' },
+    ]);
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.deleteAccount(req, res);
+
+    expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining('item1.jpg'));
+    expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining('item2.jpg'));
+    expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining('banner.jpg'));
+  });
+
+  it('returns a 500 when deletion fails', async () => {
+    User.findById.mockResolvedValue({ _id: 'u1', bannerImage: '' });
+    User.findByIdAndDelete.mockRejectedValue(new Error('db down'));
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.deleteAccount(req, res);
 
     expect(res.status).toHaveBeenCalledWith(500);
   });

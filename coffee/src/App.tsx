@@ -402,6 +402,8 @@ function App() {
   const [bannerImage, setBannerImage] = useState<string | undefined>(undefined)
   const [uploadingBanner, setUploadingBanner] = useState(false)
   const [showBannerModal, setShowBannerModal] = useState(false)
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false)
+  const [deletingAccount, setDeletingAccount] = useState(false)
   // Whether the heading/eyebrow/subtitle text renders over the banner --
   // just a display preference, not persisted anywhere, so it resets to
   // shown on reload.
@@ -553,6 +555,20 @@ function App() {
     setItems([])
     setPage('dashboard')
     setBannerImage(undefined)
+  }
+
+  const handleDeleteAccount = async () => {
+    setLoadError('')
+    setDeletingAccount(true)
+    try {
+      await api.deleteAccount()
+      setShowDeleteAccountModal(false)
+      handleLogout()
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Could not delete account')
+    } finally {
+      setDeletingAccount(false)
+    }
   }
 
   // Uploads immediately (unlike item photos, there's no surrounding form/
@@ -894,7 +910,7 @@ function App() {
             className={page === 'settings' ? 'active' : ''}
             onClick={() => setPage('settings')}
           >
-            <Icon name="edit" /> Customize
+            <Icon name="edit" /> Settings
           </button>
         </nav>
         <div className="sidebar-bottom">
@@ -1115,6 +1131,28 @@ function App() {
                 }}
               >
                 Restore demo branding
+              </button>
+            </div>
+            <div className="settings-card danger-zone">
+              <div className="settings-title">
+                <span className="settings-symbol">
+                  <Icon name="trash" />
+                </span>
+                <div>
+                  <h2>Danger zone</h2>
+                  <p>Permanently delete your account and all of its data.</p>
+                </div>
+              </div>
+              <p className="field-help">
+                This removes your account, every item, every category, and any uploaded photos. This
+                action cannot be undone.
+              </p>
+              <button
+                type="button"
+                className="danger full-button"
+                onClick={() => setShowDeleteAccountModal(true)}
+              >
+                Delete account
               </button>
             </div>
           </section>
@@ -1344,6 +1382,32 @@ function App() {
             <div className="modal-actions">
               <button type="button" className="primary" onClick={() => setShowBannerModal(false)}>
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showDeleteAccountModal && (
+        <div className="modal-backdrop">
+          <div className="modal delete-modal">
+            <span className="delete-icon">
+              <Icon name="trash" />
+            </span>
+            <h2>Delete your account?</h2>
+            <p>
+              This permanently removes your account, every inventory item, every category, and any
+              uploaded photos. This action cannot be undone.
+            </p>
+            <div className="modal-actions">
+              <button
+                className="secondary"
+                disabled={deletingAccount}
+                onClick={() => setShowDeleteAccountModal(false)}
+              >
+                Cancel
+              </button>
+              <button className="danger" disabled={deletingAccount} onClick={handleDeleteAccount}>
+                {deletingAccount ? 'Deleting…' : 'Delete account'}
               </button>
             </div>
           </div>

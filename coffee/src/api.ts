@@ -73,6 +73,16 @@ export async function updateBanner(bannerImage: string): Promise<AuthUser> {
   return data.user ?? data;
 }
 
+// Deletes the logged-in account along with all of its items, categories,
+// and uploaded files (photos, banner) -- handled server-side.
+export async function deleteAccount(): Promise<void> {
+  const res = await fetch(buildPath('/api/auth/account'), {
+    method: 'DELETE',
+    headers: { ...authHeaders() },
+  });
+  await handle(res);
+}
+
 // ---------------- Items ----------------
 // Matches your Item schema: name, sku, unit, amount, categoryID, pictureURL, lowStockThreshold
 
