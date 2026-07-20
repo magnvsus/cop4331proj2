@@ -18,9 +18,11 @@ function getTransporter() {
 
 // Base URL used to build the link in the email -- points at this API server
 // (verification is confirmed by hitting a backend route directly, not
-// through the frontend app), e.g. https://aecm.site or http://localhost:5000.
+// through the frontend app), e.g. https://your-domain.com or
+// http://localhost:5000. Shared with the frontend's own API_DOMAIN var
+// (see vite.config.ts) so there's only one URL to keep in sync.
 function verificationLink(token) {
-    const base = (process.env.API_BASE_URL || 'http://localhost:5000').replace(/\/+$/, '');
+    const base = (process.env.API_DOMAIN || 'http://localhost:5000').replace(/\/+$/, '');
     return `${base}/api/auth/verify-email/${token}`;
 }
 

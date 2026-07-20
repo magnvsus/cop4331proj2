@@ -81,10 +81,14 @@ cd ..
 
 ## Environment variables
 
-Create a `.env` file inside `backend/` (and, if you run the backend from the repo root via `npm start`, one at the repo root too) with:
+A single `.env` file in the **repo root** is shared by both the backend and the frontend — there's no separate `.env` needed in `backend/` or `coffee/`. Copy the example and fill in real values:
+
+```bash
+cp .env.example .env
+```
 
 ```
-PORT=5000
+API_PORT=5000
 MONGODB_URI=<your MongoDB connection string>
 MONGODB_DB_NAME=<your database name>
 JWT_SECRET=<a random secret string>
@@ -94,10 +98,17 @@ JWT_EXPIRES_IN=24h
 EMAIL_USER=<your Gmail address>
 EMAIL_APP_PASSWORD=<a Gmail App Password -- not your regular password>
 EMAIL_FROM=<optional; defaults to EMAIL_USER>
-API_BASE_URL=http://localhost:5000
+
+# The backend's public URL -- used by BOTH the backend (verification-email
+# links) and the frontend (base URL for API calls)
+API_DOMAIN=https://your-domain.com
 ```
 
-`EMAIL_APP_PASSWORD` requires 2-Step Verification to be enabled on the Gmail account, then generating an [App Password](https://myaccount.google.com/apppasswords) for it — a regular Gmail password won't authenticate over SMTP. `API_BASE_URL` is the public URL used to build the link in the verification email (e.g. `https://aecm.site` in production); the verification link itself is a backend route (`/api/auth/verify-email/:token`) that shows a plain confirmation page, not a frontend route.
+`EMAIL_APP_PASSWORD` requires 2-Step Verification to be enabled on the Gmail account, then generating an [App Password](https://myaccount.google.com/apppasswords) for it — a regular Gmail password won't authenticate over SMTP.
+
+`API_DOMAIN` is shared by both sides under the same name: the backend uses it to build the link in the verification email (the link itself is a backend route, `/api/auth/verify-email/:token`, that shows a plain confirmation page, not a frontend route), and the frontend uses it as the base URL for every API call. It's optional for local dev (defaults to `http://localhost:5000` on both sides), but for a production or Android build where the API is served from a different origin than the frontend, it needs to be set **before** running `npm run build` (see below) — Vite bakes it in at build time, there's no way to change it afterward without rebuilding.
+
+Vite only exposes `VITE_`-prefixed variables to the frontend's client-side bundle by default; `API_DOMAIN` is the one deliberate exception, explicitly exposed via `define` in `coffee/vite.config.ts` (which also points Vite's env loading at this root file via `envDir`) — every other backend-only secret above stays out of the client bundle even though everything lives in one file.
 
 ## Running the app for development
 
@@ -111,6 +122,8 @@ npm run dev
 ```
 
 ### Building the frontend for production
+
+Make sure the root `.env` has `API_DOMAIN` set to your deployed backend's URL first (see [Environment variables](#environment-variables)) — this also applies to Android builds, since `npx cap sync android` just copies this same build output into the native project.
 
 ```bash
 cd coffee

@@ -3,13 +3,23 @@
 // All calls to the real backend live here, matched against the actual
 // authController / categoryController / itemController you shared.
 
-const APP_DOMAIN = 'aecm.site' // TODO: replace with your actual domain if different
+// The backend's public URL (e.g. "https://your-domain.com"), set via the
+// API_DOMAIN env var at build time -- see .env.example. Shared verbatim with
+// the backend (mailer.js uses the same var to build verification-email
+// links), and exposed to this file specifically via the `define` in
+// vite.config.ts rather than the usual VITE_ prefix. Vite bakes this in as a
+// compile-time constant, so for the Android build specifically it must be
+// set *before* running `npm run build` / `npx cap sync android`; there's no
+// way to change it at runtime afterward. Falls back to the local dev backend
+// when unset, so `npm run dev` works out of the box; falls back to the
+// page's own origin (relative paths) for an unset production build, for
+// setups where the API is reverse-proxied under the same domain.
+const API_URL =
+  (import.meta.env.API_DOMAIN as string | undefined)?.replace(/\/+$/, '') ||
+  (import.meta.env.DEV ? 'http://localhost:5000' : '')
 
 function buildPath(route: string): string {
-  if (import.meta.env.DEV) {
-    return 'http://localhost:5000' + route
-  }
-  return 'https://' + APP_DOMAIN + route
+  return API_URL + route
 }
 
 function authHeaders(): HeadersInit {
