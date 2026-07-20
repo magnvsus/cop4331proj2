@@ -37,11 +37,27 @@ export function resolveImageUrl(pictureURL?: string): string | undefined {
   return buildPath(pictureURL)
 }
 
+// Thrown instead of a plain Error so callers can distinguish specific
+// failures (e.g. ACCOUNT_DEACTIVATED) from a generic "something went wrong"
+// message, without parsing error text. `data` carries the rest of the
+// response body for anything a specific error code needs to display (e.g.
+// login's deactivatesAt).
+export class ApiError extends Error {
+  code?: string
+  data?: Record<string, unknown>
+  constructor(message: string, code?: string, data?: Record<string, unknown>) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+    this.data = data
+  }
+}
+
 async function handle(res: Response) {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const message = data.error || data.message || `Request failed (${res.status})`
-    throw new Error(data.details ? `${message}: ${data.details}` : message)
+    throw new ApiError(data.details ? `${message}: ${data.details}` : message, data.code, data)
   }
   return data
 }
@@ -64,6 +80,7 @@ export type AuthUser = {
   email: string
   isVerified?: boolean
   bannerImage?: string
+  deactivatesAt?: string | null
   settings?: AccountSettings
 }
 

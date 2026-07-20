@@ -50,6 +50,10 @@ const userSchema = new mongoose.Schema({
     // of normal query results, same as password.
     emailVerificationToken: { type: String, select: false },
     emailVerificationExpires: { type: Date, select: false },
+    // Set once, at verification time, to (verifiedAt + ACCOUNT_DEACTIVATION_DAYS).
+    // Unverified accounts never get this set, so they're never blocked by it --
+    // see authController.login/getCurrentUser for the actual enforcement.
+    deactivatesAt: { type: Date },
     bannerImage: { type: String },
     settings: { type: settingsSchema, default: () => ({}) }
 },

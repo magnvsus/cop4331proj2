@@ -85,6 +85,10 @@ paths:
           description: Unauthorized (invalid email or password)
           schema:
             $ref: '#/definitions/errorResponse'
+        403:
+          description: Forbidden -- account has been deactivated (code ACCOUNT_DEACTIVATED), or was deactivated and has since been permanently deleted for inactivity (code ACCOUNT_DELETED, no deactivatesAt field)
+          schema:
+            $ref: '#/definitions/deactivatedResponse'
         500:
           description: Server Error
           schema:
@@ -108,6 +112,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/userResponse'
+        403:
+          description: Forbidden -- account has been deactivated (code ACCOUNT_DEACTIVATED), or was deactivated and has since been permanently deleted for inactivity (code ACCOUNT_DELETED, no deactivatesAt field)
+          schema:
+            $ref: '#/definitions/deactivatedResponse'
         404:
           description: User Not Found
           schema:
@@ -676,6 +684,11 @@ definitions:
       bannerImage:
         type: string
         example: /uploads/1a2b3c.jpg
+      deactivatesAt:
+        type: string
+        format: date-time
+        description: When this account will be auto-deactivated. Only present on login and /me responses; null if the account isn't verified yet.
+        example: '2026-07-27T00:00:00.000Z'
       settings:
         $ref: '#/definitions/accountSettings'
 
@@ -897,3 +910,17 @@ definitions:
       retryAfterSeconds:
         type: integer
         example: 42
+
+  deactivatedResponse:
+    type: object
+    properties:
+      error:
+        type: string
+        example: This account has been deactivated.
+      code:
+        type: string
+        example: ACCOUNT_DEACTIVATED
+      deactivatesAt:
+        type: string
+        format: date-time
+        example: '2026-07-27T00:00:00.000Z'

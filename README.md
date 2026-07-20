@@ -99,12 +99,22 @@ EMAIL_USER=<your Gmail address>
 EMAIL_APP_PASSWORD=<a Gmail App Password -- not your regular password>
 EMAIL_FROM=<optional; defaults to EMAIL_USER>
 
+# Days after verifying before an account is auto-deactivated (blocked from
+# logging in). Optional; defaults to 7.
+ACCOUNT_DEACTIVATION_DAYS=7
+
+# Days after deactivation before the account is permanently deleted if it's
+# never reactivated. Optional; defaults to 7.
+ACCOUNT_DELETION_GRACE_DAYS=7
+
 # The backend's public URL -- used by BOTH the backend (verification-email
 # links) and the frontend (base URL for API calls)
 API_DOMAIN=https://your-domain.com
 ```
 
 `EMAIL_APP_PASSWORD` requires 2-Step Verification to be enabled on the Gmail account, then generating an [App Password](https://myaccount.google.com/apppasswords) for it — a regular Gmail password won't authenticate over SMTP.
+
+`ACCOUNT_DEACTIVATION_DAYS` starts counting from when an account is *verified* (not when it's registered) — an unverified account is never deactivated by this. Once the window elapses, login (and restoring an existing session) is blocked with a distinct `ACCOUNT_DEACTIVATED` error code, and the *same* verification link mechanism doubles as reactivation: clicking a fresh link (whether from the original email or a new one) resets `deactivatesAt` and unblocks login again, no separate "reactivate" flow needed. A deactivated account that attempts to log in automatically gets a new link emailed to it, subject to the same 60-second resend cooldown enforced server-side (not just in the UI) so repeated login attempts can't spam the mailbox. If `ACCOUNT_DELETION_GRACE_DAYS` passes with no reactivation, the account and all its data (items, categories, uploaded photos) are permanently deleted the next time anyone attempts to log in to it or restore a session with its token — there's no background job, deletion is only ever checked lazily at that point.
 
 `API_DOMAIN` is shared by both sides under the same name: the backend uses it to build the link in the verification email (the link itself is a backend route, `/api/auth/verify-email/:token`, that shows a plain confirmation page, not a frontend route), and the frontend uses it as the base URL for every API call. It's optional for local dev (defaults to `http://localhost:5000` on both sides), but for a production or Android build where the API is served from a different origin than the frontend, it needs to be set **before** running `npm run build` (see below) — Vite bakes it in at build time, there's no way to change it afterward without rebuilding.
 
@@ -135,6 +145,28 @@ This type-checks the project (`tsc -b`) and bundles it with Vite into `coffee/di
 ```bash
 npm run preview
 ```
+
+## Testing account deactivation
+
+The deactivation/reactivation/deletion lifecycle (see [Environment variables](#environment-variables)) is entirely driven by two `.env` durations, `ACCOUNT_DEACTIVATION_DAYS` and `ACCOUNT_DELETION_GRACE_DAYS`. Both accept fractional values, so for local testing or a live demo, set them to a fraction of a day instead of waiting a real week:
+
+```
+ACCOUNT_DEACTIVATION_DAYS=0.0007   # ~1 minute
+ACCOUNT_DELETION_GRACE_DAYS=0.0007 # ~1 minute
+```
+
+(`days × 86400` = seconds -- e.g. `30 / 86400 = 0.000347` for 30 seconds.)
+
+Restart the backend after changing these (`npm start` picks up `.env` on startup, not live). With that in place, here's a script for demoing the whole lifecycle:
+
+1. **Register** a new account through the app (or `POST /api/auth/register`).
+2. **Verify it** by clicking the link in the email that gets sent — or skip waiting on email entirely: the backend logs the exact link to its console every time one is sent (`Verification/reactivation link for ...: https://...`), so you can just copy it from the terminal running `npm start`. This starts the `ACCOUNT_DEACTIVATION_DAYS` clock.
+3. **Wait** past whatever you set `ACCOUNT_DEACTIVATION_DAYS` to (~1 minute with the value above).
+4. **Attempt to log in.** You'll see the "Account deactivated" modal — and the backend console will log a fresh reactivation link at the same moment, since a deactivated login attempt auto-sends one (subject to the 60-second resend cooldown, so don't spam the login button expecting a new link every time).
+5. **To demonstrate reactivation:** open the link the console just logged. You'll get the "Account confirmed" confirmation page, and logging in now succeeds again — `deactivatesAt` has been pushed forward another `ACCOUNT_DEACTIVATION_DAYS`.
+6. **To demonstrate auto-deletion instead:** don't click the link. Wait past `ACCOUNT_DELETION_GRACE_DAYS` as well, then attempt to log in (or just refresh the page) one more time — the account is deleted at that exact moment (there's no background job; deletion is only ever checked lazily, right when someone tries to use the account) and the response switches to a distinct "permanently deleted" message rather than the deactivated one. You can confirm it's actually gone by trying to log in again with the same credentials — you'll get the normal "Invalid email or password" for a nonexistent account.
+
+Remember to set both variables back to real day-scale values (or just remove them, since 7 is the default for both) before deploying for real.
 
 ## Running tests
 

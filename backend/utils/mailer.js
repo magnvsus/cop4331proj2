@@ -26,16 +26,26 @@ function verificationLink(token) {
     return `${base}/api/auth/verify-email/${token}`;
 }
 
+// Used for both first-time verification and reactivating a deactivated
+// account -- same link, same underlying token mechanism (see
+// authController.verifyEmail), so the copy stays neutral rather than
+// presuming "welcome, new user."
 async function sendVerificationEmail(toEmail, token) {
     const link = verificationLink(token);
+
+    // Logged unconditionally (not just on failure) so the link is easy to
+    // grab from the server console during local testing/demos, without
+    // depending on real email delivery actually arriving in time.
+    console.log(`Verification/reactivation link for ${toEmail}: ${link}`);
+
     await getTransporter().sendMail({
         from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
         to: toEmail,
-        subject: 'Verify your Inventory Hub account',
-        text: `Welcome to Inventory Hub! Verify your account by visiting: ${link}\n\nThis link expires in 24 hours.`,
+        subject: 'Confirm your Inventory Hub account',
+        text: `Confirm your Inventory Hub account by visiting: ${link}\n\nThis link expires in 24 hours.`,
         html: `
-            <p>Welcome to Inventory Hub!</p>
-            <p><a href="${link}">Click here to verify your account</a></p>
+            <p>Confirm your Inventory Hub account.</p>
+            <p><a href="${link}">Click here to confirm your account</a></p>
             <p>Or paste this link into your browser:<br>${link}</p>
             <p>This link expires in 24 hours.</p>
         `,

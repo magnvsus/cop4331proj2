@@ -880,6 +880,10 @@ tbody tr:hover {
   background: #fff0d1;
   color: #b67824;
 }
+.notice-icon.danger {
+  background: #fae8e5;
+  color: #a33b31;
+}
 .modal-close {
   position: absolute;
   top: 0;
