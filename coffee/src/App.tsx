@@ -233,6 +233,21 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
   const [regError, setRegError] = useState('')
   const [regSubmitting, setRegSubmitting] = useState(false)
 
+  // After the account itself is created, a second step collects the
+  // business details before actually logging in -- left blank fields fall
+  // back to the server's defaults rather than being pre-filled with them, so
+  // a new user never ends up with "Coffee Hour" / "Alex Morgan" without
+  // having chosen that. Categories are the one field pre-filled with the
+  // starter list, since those are meant as editable suggestions, not a
+  // placeholder someone has to actively opt into.
+  const [regStep, setRegStep] = useState<'account' | 'details'>('account')
+  const [onboardCompanyName, setOnboardCompanyName] = useState('')
+  const [onboardBusinessType, setOnboardBusinessType] = useState('')
+  const [onboardManagerName, setOnboardManagerName] = useState('')
+  const [onboardCategories, setOnboardCategories] = useState(categories.join(', '))
+  const [onboardError, setOnboardError] = useState('')
+  const [onboardSubmitting, setOnboardSubmitting] = useState(false)
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     setError('')
@@ -248,15 +263,21 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
 
   const closeRegister = () => {
     setShowRegister(false)
+    setRegStep('account')
     setRegEmail('')
     setRegPassword('')
     setRegConfirmPassword('')
     setRegError('')
+    setOnboardCompanyName('')
+    setOnboardBusinessType('')
+    setOnboardManagerName('')
+    setOnboardCategories(categories.join(', '))
+    setOnboardError('')
   }
 
-  // Registers the account, then immediately signs in with the same
-  // credentials -- api.register() only confirms the account was created, it
-  // doesn't log the user in on its own.
+  // Creates the account, then moves to the business-details step -- login
+  // happens once that step is finished (or skipped by leaving it blank),
+  // not immediately here.
   const handleRegister = async (event: FormEvent) => {
     event.preventDefault()
     setRegError('')
@@ -267,12 +288,51 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
     setRegSubmitting(true)
     try {
       await api.register(regEmail, regPassword)
-      await onLogin(regEmail, regPassword)
-      closeRegister()
+      setRegStep('details')
     } catch (err) {
       setRegError(err instanceof Error ? err.message : 'Could not create account')
     } finally {
       setRegSubmitting(false)
+    }
+  }
+
+  // Saves whatever business details were entered (skipping blank fields
+  // entirely rather than sending them as empty strings, so the server's
+  // defaults apply), creates the starter categories, then logs in --
+  // onLogin() re-fetches the account so the freshly-saved settings come back
+  // in the same response, no separate refresh needed.
+  const handleFinishOnboarding = async (event: FormEvent) => {
+    event.preventDefault()
+    setOnboardError('')
+    setOnboardSubmitting(true)
+    try {
+      const { token } = await api.login(regEmail, regPassword)
+      localStorage.setItem('token', token)
+
+      const categoryNames = onboardCategories
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+      for (const name of categoryNames) {
+        await api.addCategory(name)
+      }
+
+      const settingsPatch: Partial<api.AccountSettings> = {}
+      if (onboardCompanyName.trim()) settingsPatch.companyName = onboardCompanyName.trim()
+      if (onboardBusinessType.trim()) settingsPatch.businessType = onboardBusinessType.trim()
+      if (onboardManagerName.trim()) settingsPatch.managerName = onboardManagerName.trim()
+      if (Object.keys(settingsPatch).length > 0) {
+        await api.updateSettings(settingsPatch)
+      }
+
+      await onLogin(regEmail, regPassword)
+      closeRegister()
+    } catch (err) {
+      setOnboardError(
+        err instanceof Error ? err.message : 'Could not finish setting up your account',
+      )
+    } finally {
+      setOnboardSubmitting(false)
     }
   }
 
@@ -371,7 +431,7 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
         </div>
         <p className="copyright">© 2026 Inventory Hub · Coffee Hour Demo</p>
       </section>
-      {showRegister && (
+      {showRegister && regStep === 'account' && (
         <div className="modal-backdrop" onMouseDown={closeRegister}>
           <form
             className="modal"
@@ -428,7 +488,76 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
                 Cancel
               </button>
               <button className="primary" type="submit" disabled={regSubmitting}>
-                {regSubmitting ? 'Creating account…' : 'Create account'}
+                {regSubmitting ? 'Creating account…' : 'Continue'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {showRegister && regStep === 'details' && (
+        <div className="modal-backdrop">
+          <form
+            className="modal"
+            onSubmit={handleFinishOnboarding}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="modal-head">
+              <div>
+                <span className="eyebrow">ACCOUNT DETAILS</span>
+                <h2>Tell us about your business</h2>
+              </div>
+              <button type="button" onClick={closeRegister}>
+                ×
+              </button>
+            </div>
+            <p className="field-help">
+              Leave a field blank to use its default -- you can always change these later in
+              Settings.
+            </p>
+            <label>
+              Company name
+              <input
+                value={onboardCompanyName}
+                onChange={(e) => setOnboardCompanyName(e.target.value)}
+                placeholder="Coffee Hour"
+              />
+            </label>
+            <label>
+              Business type
+              <input
+                value={onboardBusinessType}
+                onChange={(e) => setOnboardBusinessType(e.target.value)}
+                placeholder="Coffee shop"
+              />
+            </label>
+            <label>
+              Manager name
+              <input
+                value={onboardManagerName}
+                onChange={(e) => setOnboardManagerName(e.target.value)}
+                placeholder="Alex Morgan"
+              />
+            </label>
+            <label>
+              Inventory categories
+              <input
+                value={onboardCategories}
+                onChange={(e) => setOnboardCategories(e.target.value)}
+                placeholder="Supplies, Products, Equipment"
+              />
+              <small className="field-help">Separate categories with commas.</small>
+            </label>
+            {onboardError && (
+              <p className="field-help" style={{ color: '#a33b31' }}>
+                {onboardError}
+              </p>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={closeRegister}>
+                Cancel
+              </button>
+              <button className="primary" type="submit" disabled={onboardSubmitting}>
+                {onboardSubmitting ? 'Finishing…' : 'Finish setup'}
               </button>
             </div>
           </form>
@@ -1379,210 +1508,214 @@ function App() {
           inventoryPanel
         ) : (
           <section className="settings-grid">
-            <div className="settings-card">
-              <div className="settings-title">
-                <span className="settings-symbol">
-                  <Icon name="alert" />
-                </span>
-                <div>
-                  <h2>Account verification</h2>
-                  <p>Confirms this is really your email address.</p>
+            <div className="settings-column">
+              <form className="settings-card" onSubmit={saveCategorySettings}>
+                <div className="settings-title">
+                  <span className="settings-symbol">
+                    <Icon name="edit" />
+                  </span>
+                  <div>
+                    <h2>Company details</h2>
+                    <p>These details appear throughout the dashboard.</p>
+                  </div>
                 </div>
-              </div>
-              <div className={accountVerified ? 'verify-status verified' : 'verify-status'}>
-                <strong>{accountVerified ? 'Verified' : 'Not verified'}</strong>
-                <p>
-                  {accountVerified
-                    ? `${accountEmail} has been verified.`
-                    : `We sent a verification link to ${accountEmail}. Check your inbox (and spam folder) to verify your account.`}
-                </p>
-              </div>
-              {!accountVerified && (
-                <>
+                <label>
+                  Company name
+                  <input
+                    value={company.name}
+                    onChange={(event) => setCompany({ ...company, name: event.target.value })}
+                    required
+                  />
+                </label>
+                <label>
+                  Business type
+                  <input
+                    value={company.type}
+                    onChange={(event) => setCompany({ ...company, type: event.target.value })}
+                    placeholder="Retail store, salon, clinic..."
+                    required
+                  />
+                </label>
+                <label>
+                  Manager name
+                  <input
+                    value={company.manager}
+                    onChange={(event) => setCompany({ ...company, manager: event.target.value })}
+                    required
+                  />
+                </label>
+                <label>
+                  Inventory categories
+                  <input
+                    value={categoryInput}
+                    onChange={(event) => setCategoryInput(event.target.value)}
+                    placeholder="Supplies, Products, Equipment"
+                    required
+                  />
+                  <small className="field-help">Separate categories with commas.</small>
+                </label>
+                <div className="settings-actions">
+                  <span className={saved ? 'save-message show' : 'save-message'}>
+                    ✓ Changes saved
+                  </span>
+                  <button className="primary" type="submit">
+                    Save customization
+                  </button>
+                </div>
+              </form>
+              <div className="settings-card">
+                <div className="settings-title">
+                  <span className="settings-symbol">
+                    <Icon name="alert" />
+                  </span>
+                  <div>
+                    <h2>Notifications</h2>
+                    <p>Get alerted when an item falls to or below its low-stock threshold.</p>
+                  </div>
+                </div>
+                <div className="settings-toggle-row first">
+                  <div>
+                    <strong>Enable notifications</strong>
+                    <p>Send a low-stock alert for this account.</p>
+                  </div>
                   <button
                     type="button"
-                    className="secondary full-button"
-                    disabled={resendingVerification || resendCooldownSecondsLeft > 0}
-                    onClick={handleResendVerification}
+                    className={notificationsEnabled ? 'toggle-switch on' : 'toggle-switch'}
+                    role="switch"
+                    aria-checked={notificationsEnabled}
+                    aria-label="Toggle low-stock notifications"
+                    onClick={() => handleToggleNotifications(!notificationsEnabled)}
                   >
-                    {resendingVerification
-                      ? 'Sending…'
-                      : resendCooldownSecondsLeft > 0
-                        ? `Resend available in ${resendCooldownSecondsLeft}s`
-                        : 'Resend verification email'}
+                    <span />
                   </button>
-                  {resendError && <p className="field-help">{resendError}</p>}
-                </>
-              )}
+                </div>
+                <label>
+                  Notification frequency
+                  <select
+                    value={notificationFrequency}
+                    disabled={!notificationsEnabled}
+                    onChange={(event) =>
+                      setNotificationFrequency(event.target.value as NotificationFrequency)
+                    }
+                  >
+                    <option value="immediate">As soon as an item is low</option>
+                    <option value="hourly">At most once an hour</option>
+                    <option value="daily">At most once a day</option>
+                  </select>
+                </label>
+                {!isNativePlatform && (
+                  <p className="field-help">
+                    Push notifications are only delivered in the Android app -- this setting still
+                    saves for when you use it there.
+                  </p>
+                )}
+              </div>
             </div>
-            <form className="settings-card" onSubmit={saveCategorySettings}>
-              <div className="settings-title">
-                <span className="settings-symbol">
-                  <Icon name="edit" />
-                </span>
-                <div>
-                  <h2>Company details</h2>
-                  <p>These details appear throughout the dashboard.</p>
+            <div className="settings-column">
+              <div className="settings-card">
+                <div className="settings-title">
+                  <span className="settings-symbol">
+                    <Icon name="grid" />
+                  </span>
+                  <div>
+                    <h2>Brand color</h2>
+                    <p>Choose an accent color for buttons and highlights.</p>
+                  </div>
                 </div>
-              </div>
-              <label>
-                Company name
-                <input
-                  value={company.name}
-                  onChange={(event) => setCompany({ ...company, name: event.target.value })}
-                  required
-                />
-              </label>
-              <label>
-                Business type
-                <input
-                  value={company.type}
-                  onChange={(event) => setCompany({ ...company, type: event.target.value })}
-                  placeholder="Retail store, salon, clinic..."
-                  required
-                />
-              </label>
-              <label>
-                Manager name
-                <input
-                  value={company.manager}
-                  onChange={(event) => setCompany({ ...company, manager: event.target.value })}
-                  required
-                />
-              </label>
-              <label>
-                Inventory categories
-                <input
-                  value={categoryInput}
-                  onChange={(event) => setCategoryInput(event.target.value)}
-                  placeholder="Supplies, Products, Equipment"
-                  required
-                />
-                <small className="field-help">Separate categories with commas.</small>
-              </label>
-              <div className="settings-actions">
-                <span className={saved ? 'save-message show' : 'save-message'}>
-                  ✓ Changes saved
-                </span>
-                <button className="primary" type="submit">
-                  Save customization
-                </button>
-              </div>
-            </form>
-            <div className="settings-card">
-              <div className="settings-title">
-                <span className="settings-symbol">
-                  <Icon name="grid" />
-                </span>
-                <div>
-                  <h2>Brand color</h2>
-                  <p>Choose an accent color for buttons and highlights.</p>
+                <div className="color-row">
+                  <input
+                    aria-label="Brand color"
+                    type="color"
+                    value={company.accent}
+                    onChange={(event) => setCompany({ ...company, accent: event.target.value })}
+                  />
+                  <div>
+                    <strong>{company.accent.toUpperCase()}</strong>
+                    <small>Custom brand accent</small>
+                  </div>
                 </div>
-              </div>
-              <div className="color-row">
-                <input
-                  aria-label="Brand color"
-                  type="color"
-                  value={company.accent}
-                  onChange={(event) => setCompany({ ...company, accent: event.target.value })}
-                />
-                <div>
-                  <strong>{company.accent.toUpperCase()}</strong>
-                  <small>Custom brand accent</small>
-                </div>
-              </div>
-              <div className="preview-brand">
-                <span className="brand-mark">
-                  <Icon name="box" />
-                </span>
-                <div>
-                  <strong>Inventory Hub</strong>
-                  <small>{company.name}</small>
-                </div>
-              </div>
-              <button
-                className="secondary full-button"
-                onClick={() => {
-                  setCompany({
-                    name: 'Coffee Hour',
-                    type: 'Coffee shop',
-                    accent: '#a9642e',
-                    manager: 'Alex Morgan',
-                  })
-                  setCategoryInput(businessCategories.join(', '))
-                }}
-              >
-                Restore demo branding
-              </button>
-            </div>
-            <div className="settings-card">
-              <div className="settings-title">
-                <span className="settings-symbol">
-                  <Icon name="alert" />
-                </span>
-                <div>
-                  <h2>Notifications</h2>
-                  <p>Get alerted when an item falls to or below its low-stock threshold.</p>
-                </div>
-              </div>
-              <div className="settings-toggle-row first">
-                <div>
-                  <strong>Enable notifications</strong>
-                  <p>Send a low-stock alert for this account.</p>
+                <div className="preview-brand">
+                  <span className="brand-mark">
+                    <Icon name="box" />
+                  </span>
+                  <div>
+                    <strong>Inventory Hub</strong>
+                    <small>{company.name}</small>
+                  </div>
                 </div>
                 <button
-                  type="button"
-                  className={notificationsEnabled ? 'toggle-switch on' : 'toggle-switch'}
-                  role="switch"
-                  aria-checked={notificationsEnabled}
-                  aria-label="Toggle low-stock notifications"
-                  onClick={() => handleToggleNotifications(!notificationsEnabled)}
+                  className="secondary full-button"
+                  onClick={() => {
+                    setCompany({
+                      name: 'Coffee Hour',
+                      type: 'Coffee shop',
+                      accent: '#a9642e',
+                      manager: 'Alex Morgan',
+                    })
+                    setCategoryInput(businessCategories.join(', '))
+                  }}
                 >
-                  <span />
+                  Restore demo branding
                 </button>
               </div>
-              <label>
-                Notification frequency
-                <select
-                  value={notificationFrequency}
-                  disabled={!notificationsEnabled}
-                  onChange={(event) =>
-                    setNotificationFrequency(event.target.value as NotificationFrequency)
-                  }
-                >
-                  <option value="immediate">As soon as an item is low</option>
-                  <option value="hourly">At most once an hour</option>
-                  <option value="daily">At most once a day</option>
-                </select>
-              </label>
-              {!isNativePlatform && (
-                <p className="field-help">
-                  Push notifications are only delivered in the Android app -- this setting still
-                  saves for when you use it there.
-                </p>
-              )}
-            </div>
-            <div className="settings-card danger-zone">
-              <div className="settings-title">
-                <span className="settings-symbol">
-                  <Icon name="trash" />
-                </span>
-                <div>
-                  <h2>Danger zone</h2>
-                  <p>Permanently delete your account and all of its data.</p>
+              <div className="settings-card">
+                <div className="settings-title">
+                  <span className="settings-symbol">
+                    <Icon name="alert" />
+                  </span>
+                  <div>
+                    <h2>Account verification</h2>
+                    <p>Confirms this is really your email address.</p>
+                  </div>
                 </div>
+                <div className={accountVerified ? 'verify-status verified' : 'verify-status'}>
+                  <strong>{accountVerified ? 'Verified' : 'Not verified'}</strong>
+                  <p>
+                    {accountVerified
+                      ? `${accountEmail} has been verified.`
+                      : `We sent a verification link to ${accountEmail}. Check your inbox (and spam folder) to verify your account.`}
+                  </p>
+                </div>
+                {!accountVerified && (
+                  <>
+                    <button
+                      type="button"
+                      className="secondary full-button"
+                      disabled={resendingVerification || resendCooldownSecondsLeft > 0}
+                      onClick={handleResendVerification}
+                    >
+                      {resendingVerification
+                        ? 'Sending…'
+                        : resendCooldownSecondsLeft > 0
+                          ? `Resend available in ${resendCooldownSecondsLeft}s`
+                          : 'Resend verification email'}
+                    </button>
+                    {resendError && <p className="field-help">{resendError}</p>}
+                  </>
+                )}
               </div>
-              <p className="field-help">
-                This removes your account, every item, every category, and any uploaded photos. This
-                action cannot be undone.
-              </p>
-              <button
-                type="button"
-                className="danger full-button"
-                onClick={() => setShowDeleteAccountModal(true)}
-              >
-                Delete account
-              </button>
+              <div className="settings-card danger-zone">
+                <div className="settings-title">
+                  <span className="settings-symbol">
+                    <Icon name="trash" />
+                  </span>
+                  <div>
+                    <h2>Danger zone</h2>
+                    <p>Permanently delete your account and all of its data.</p>
+                  </div>
+                </div>
+                <p className="field-help">
+                  This removes your account, every item, every category, and any uploaded photos.
+                  This action cannot be undone.
+                </p>
+                <button
+                  type="button"
+                  className="danger full-button"
+                  onClick={() => setShowDeleteAccountModal(true)}
+                >
+                  Delete account
+                </button>
+              </div>
             </div>
           </section>
         )}
