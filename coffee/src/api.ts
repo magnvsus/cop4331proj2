@@ -68,6 +68,28 @@ export async function register(email: string, password: string): Promise<{ messa
   return handle(res)
 }
 
+export type ResendVerificationResult =
+  { ok: true } | { ok: false; message: string; retryAfterSeconds?: number }
+
+// Doesn't throw on failure (unlike the rest of this file) so the caller can
+// read retryAfterSeconds off a 429 and sync the resend button's cooldown to
+// the server's authoritative value -- e.g. if localStorage was cleared or
+// this is a second device.
+export async function resendVerification(): Promise<ResendVerificationResult> {
+  const res = await fetch(buildPath('/api/auth/resend-verification'), {
+    method: 'POST',
+    headers: { ...authHeaders() },
+  })
+  const data = await res.json().catch(() => ({}))
+  if (res.ok) return { ok: true }
+  return {
+    ok: false,
+    message: data.error || data.message || `Request failed (${res.status})`,
+    retryAfterSeconds:
+      typeof data.retryAfterSeconds === 'number' ? data.retryAfterSeconds : undefined,
+  }
+}
+
 export async function login(
   email: string,
   password: string,

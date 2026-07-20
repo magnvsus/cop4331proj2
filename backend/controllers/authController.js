@@ -1,9 +1,37 @@
+const crypto = require('crypto');
 const User = require('../models/User');
 const Item = require('../models/Item');
 const Category = require('../models/Category');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { deleteLocalUpload } = require('../utils/localUploads');
+const { sendVerificationEmail } = require('../utils/mailer');
+
+const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
+const RESEND_VERIFICATION_COOLDOWN_MS = 60 * 1000;
+
+// Raw token goes out in the email; only its SHA-256 hash is ever stored, so a
+// database leak alone can't be used to verify (or take over) an account.
+function createVerificationToken() {
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+    return { rawToken, hashedToken };
+}
+
+function verificationEmailPage(success) {
+    const title = success ? 'Email verified' : 'Verification failed';
+    const message = success
+        ? 'Your account has been verified. You can close this page and log in.'
+        : 'This verification link is invalid or has expired.';
+    return `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>${title} - Inventory Hub</title></head>
+<body style="font-family: sans-serif; text-align: center; padding: 60px 20px; color: #30251e;">
+    <h1 style="color: ${success ? '#477259' : '#a33b31'};">${title}</h1>
+    <p>${message}</p>
+</body>
+</html>`;
+}
 
 // Settings updates only ever touch these fields -- anything else in the
 // request body is silently ignored rather than merged in, so a crafted
@@ -58,20 +86,102 @@ exports.register = async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
 
+        const { rawToken, hashedToken } = createVerificationToken();
+
         // Create and save new user
         const newUser = new User({
             email,
-            password: hashedPassword
+            password: hashedPassword,
+            emailVerificationToken: hashedToken,
+            emailVerificationExpires: Date.now() + EMAIL_VERIFICATION_TTL_MS
         });
 
         await newUser.save();
 
-        res.status(201).json({ message: 'User registered successfully'});
+        // The account is already created at this point -- a flaky mail
+        // provider shouldn't turn that into a failed signup, so a send
+        // failure is logged rather than surfaced as an error response.
+        try {
+            await sendVerificationEmail(email, rawToken);
+        } catch (emailError) {
+            console.error('Failed to send verification email:', emailError.message);
+        }
+
+        res.status(201).json({
+            message: 'User registered successfully. Check your email to verify your account.'
+        });
     } catch (error) {
         res.status(500).json({ error: 'Server error during registration', details: error.message});
     }
 };
- 
+
+// VERIFY EMAIL
+exports.verifyEmail = async (req, res) => {
+    try {
+        const { token } = req.params;
+        const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+
+        const user = await User.findOne({
+            emailVerificationToken: hashedToken,
+            emailVerificationExpires: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).type('html').send(verificationEmailPage(false));
+        }
+
+        user.isVerified = true;
+        user.emailVerificationToken = undefined;
+        user.emailVerificationExpires = undefined;
+        await user.save();
+
+        res.status(200).type('html').send(verificationEmailPage(true));
+    } catch (error) {
+        res.status(500).type('html').send(verificationEmailPage(false));
+    }
+};
+
+// RESEND VERIFICATION EMAIL
+exports.resendVerification = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const user = await User.findById(userId).select('+emailVerificationExpires');
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        if (user.isVerified) {
+            return res.status(400).json({ error: 'Account is already verified' });
+        }
+
+        // The 24h TTL is always set to (sentAt + EMAIL_VERIFICATION_TTL_MS)
+        // whenever a token is issued, so it doubles as a "last sent" marker
+        // without needing a separate field. Enforced here (not just in the
+        // frontend button) so the cooldown can't be bypassed by calling this
+        // endpoint directly.
+        const lastSentAt = user.emailVerificationExpires
+            ? user.emailVerificationExpires.getTime() - EMAIL_VERIFICATION_TTL_MS
+            : 0;
+        const msSinceLastSend = Date.now() - lastSentAt;
+        if (msSinceLastSend < RESEND_VERIFICATION_COOLDOWN_MS) {
+            const retryAfterSeconds = Math.ceil((RESEND_VERIFICATION_COOLDOWN_MS - msSinceLastSend) / 1000);
+            return res.status(429).json({
+                error: 'Please wait before requesting another verification email',
+                retryAfterSeconds
+            });
+        }
+
+        const { rawToken, hashedToken } = createVerificationToken();
+        user.emailVerificationToken = hashedToken;
+        user.emailVerificationExpires = Date.now() + EMAIL_VERIFICATION_TTL_MS;
+        await user.save();
+
+        await sendVerificationEmail(user.email, rawToken);
+
+        res.status(200).json({ message: 'Verification email sent' });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to resend verification email', details: error.message });
+    }
+};
 
 // LOGIN
 exports.login = async (req, res) => {

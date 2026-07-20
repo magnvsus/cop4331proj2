@@ -44,6 +44,12 @@ const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true, lowercase: true, trim: true},
     password: { type: String, required: true, select: false },
     isVerified: { type: Boolean, default: false },
+    // Stores only a SHA-256 hash of the verification token, never the raw
+    // value that goes out in the email -- so a database leak alone can't be
+    // used to verify (or take over) an account. select: false keeps it out
+    // of normal query results, same as password.
+    emailVerificationToken: { type: String, select: false },
+    emailVerificationExpires: { type: Date, select: false },
     bannerImage: { type: String },
     settings: { type: settingsSchema, default: () => ({}) }
 },
