@@ -9,6 +9,15 @@ const Category = require('../models/Category');
 const authController = require('./authController');
 const { mockRequest, mockResponse } = require('../testUtils/expressMocks');
 
+const DEFAULT_SETTINGS = {
+  companyName: 'Coffee Hour',
+  businessType: 'Coffee shop',
+  managerName: 'Alex Morgan',
+  accentColor: '#a9642e',
+  notificationsEnabled: false,
+  notificationFrequency: 'immediate',
+};
+
 jest.mock('../models/User');
 jest.mock('../models/Item');
 jest.mock('../models/Category');
@@ -118,6 +127,14 @@ describe('authController.login', () => {
       password: 'hashed',
       isVerified: true,
       bannerImage: 'banner.png',
+      settings: {
+        companyName: 'Roast Co',
+        businessType: 'Coffee shop',
+        managerName: 'Sam Lee',
+        accentColor: '#112233',
+        notificationsEnabled: true,
+        notificationFrequency: 'hourly',
+      },
     });
     bcrypt.compare.mockResolvedValue(true);
     jwt.sign.mockReturnValue('signed.jwt.token');
@@ -131,12 +148,25 @@ describe('authController.login', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({
       token: 'signed.jwt.token',
-      user: { id: 'u1', email: 'user@example.com', isVerified: true, bannerImage: 'banner.png' },
+      user: {
+        id: 'u1',
+        email: 'user@example.com',
+        isVerified: true,
+        bannerImage: 'banner.png',
+        settings: {
+          companyName: 'Roast Co',
+          businessType: 'Coffee shop',
+          managerName: 'Sam Lee',
+          accentColor: '#112233',
+          notificationsEnabled: true,
+          notificationFrequency: 'hourly',
+        },
+      },
       error: '',
     });
   });
 
-  it('defaults bannerImage to an empty string when the user has none', async () => {
+  it('defaults bannerImage and settings when the user has none', async () => {
     mockFindOneWithPassword({ _id: 'u1', email: 'user@example.com', password: 'hashed', isVerified: false });
     bcrypt.compare.mockResolvedValue(true);
     jwt.sign.mockReturnValue('signed.jwt.token');
@@ -147,7 +177,9 @@ describe('authController.login', () => {
     await authController.login(req, res);
 
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ user: expect.objectContaining({ bannerImage: '' }) })
+      expect.objectContaining({
+        user: expect.objectContaining({ bannerImage: '', settings: DEFAULT_SETTINGS }),
+      })
     );
   });
 
@@ -245,6 +277,198 @@ describe('authController.updateBanner', () => {
     const res = mockResponse();
 
     await authController.updateBanner(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
+});
+
+describe('authController.updateSettings', () => {
+  it('rejects an accentColor that is not a hex code', async () => {
+    const req = mockRequest({ body: { accentColor: 'not-a-color' }, user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.updateSettings(req, res);
+
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('rejects a companyName over the length limit', async () => {
+    const req = mockRequest({ body: { companyName: 'x'.repeat(61) }, user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.updateSettings(req, res);
+
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('rejects an empty request body', async () => {
+    const req = mockRequest({ body: {}, user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.updateSettings(req, res);
+
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({ error: 'No valid settings fields provided' });
+  });
+
+  it('ignores fields outside the settings whitelist instead of saving them', async () => {
+    User.findByIdAndUpdate.mockResolvedValue({
+      _id: 'u1',
+      email: 'user@example.com',
+      isVerified: false,
+      bannerImage: '',
+      settings: { companyName: 'Roast Co', businessType: 'Coffee shop', managerName: 'Alex Morgan', accentColor: '#a9642e' },
+    });
+    const req = mockRequest({
+      body: { companyName: 'Roast Co', isVerified: true, password: 'hijacked' },
+      user: { userId: 'u1' },
+    });
+    const res = mockResponse();
+
+    await authController.updateSettings(req, res);
+
+    expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+      'u1',
+      { $set: { 'settings.companyName': 'Roast Co' } },
+      { new: true, runValidators: true }
+    );
+  });
+
+  it('only ever updates the settings of the authenticated user (from the verified token)', async () => {
+    User.findByIdAndUpdate.mockResolvedValue({
+      _id: 'u1',
+      email: 'user@example.com',
+      isVerified: false,
+      bannerImage: '',
+      settings: { companyName: 'Roast Co', businessType: 'Coffee shop', managerName: 'Alex Morgan', accentColor: '#a9642e' },
+    });
+    // Even if the body tries to claim a different account, req.user.userId
+    // (set by the auth middleware from the JWT) is what's actually used.
+    const req = mockRequest({
+      body: { companyName: 'Roast Co', accountID: 'someone-elses-id' },
+      user: { userId: 'u1' },
+    });
+    const res = mockResponse();
+
+    await authController.updateSettings(req, res);
+
+    expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+      'u1',
+      { $set: { 'settings.companyName': 'Roast Co' } },
+      { new: true, runValidators: true }
+    );
+  });
+
+  it('trims text fields and saves valid updates', async () => {
+    User.findByIdAndUpdate.mockResolvedValue({
+      _id: 'u1',
+      email: 'user@example.com',
+      isVerified: true,
+      bannerImage: '',
+      settings: { companyName: 'Roast Co', businessType: 'Coffee shop', managerName: 'Sam Lee', accentColor: '#112233' },
+    });
+    const req = mockRequest({
+      body: { companyName: '  Roast Co  ', managerName: 'Sam Lee', accentColor: '#112233' },
+      user: { userId: 'u1' },
+    });
+    const res = mockResponse();
+
+    await authController.updateSettings(req, res);
+
+    expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+      'u1',
+      { $set: { 'settings.companyName': 'Roast Co', 'settings.managerName': 'Sam Lee', 'settings.accentColor': '#112233' } },
+      { new: true, runValidators: true }
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      user: {
+        id: 'u1',
+        email: 'user@example.com',
+        isVerified: true,
+        bannerImage: '',
+        settings: {
+          companyName: 'Roast Co',
+          businessType: 'Coffee shop',
+          managerName: 'Sam Lee',
+          accentColor: '#112233',
+          notificationsEnabled: false,
+          notificationFrequency: 'immediate',
+        },
+      },
+      error: '',
+    });
+  });
+
+  it('rejects a non-boolean notificationsEnabled', async () => {
+    const req = mockRequest({ body: { notificationsEnabled: 'yes' }, user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.updateSettings(req, res);
+
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('rejects a notificationFrequency outside the allowed enum', async () => {
+    const req = mockRequest({ body: { notificationFrequency: 'weekly' }, user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.updateSettings(req, res);
+
+    expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  it('saves valid notification settings', async () => {
+    User.findByIdAndUpdate.mockResolvedValue({
+      _id: 'u1',
+      email: 'user@example.com',
+      isVerified: true,
+      bannerImage: '',
+      settings: { notificationsEnabled: true, notificationFrequency: 'daily' },
+    });
+    const req = mockRequest({
+      body: { notificationsEnabled: true, notificationFrequency: 'daily' },
+      user: { userId: 'u1' },
+    });
+    const res = mockResponse();
+
+    await authController.updateSettings(req, res);
+
+    expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+      'u1',
+      { $set: { 'settings.notificationsEnabled': true, 'settings.notificationFrequency': 'daily' } },
+      { new: true, runValidators: true }
+    );
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user: expect.objectContaining({
+          settings: expect.objectContaining({ notificationsEnabled: true, notificationFrequency: 'daily' }),
+        }),
+      })
+    );
+  });
+
+  it('returns 404 when the user does not exist', async () => {
+    User.findByIdAndUpdate.mockResolvedValue(null);
+    const req = mockRequest({ body: { companyName: 'Roast Co' }, user: { userId: 'ghost' } });
+    const res = mockResponse();
+
+    await authController.updateSettings(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it('returns a 500 when the update fails', async () => {
+    User.findByIdAndUpdate.mockRejectedValue(new Error('db down'));
+    const req = mockRequest({ body: { companyName: 'Roast Co' }, user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.updateSettings(req, res);
 
     expect(res.status).toHaveBeenCalledWith(500);
   });

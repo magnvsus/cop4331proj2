@@ -13,6 +13,9 @@ router.post('/login', authController.login);
 // Update Banner Route
 router.patch('/banner', protect, authController.updateBanner);
 
+// Update Settings Route
+router.patch('/settings', protect, authController.updateSettings);
+
 // Delete Account Route
 router.delete('/account', protect, authController.deleteAccount);
 

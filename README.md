@@ -68,6 +68,7 @@ cd ..
 | `@capacitor/android` | Capacitor's Android platform project |
 | `@capacitor/camera` | Native camera/gallery access for item photos (Android only) |
 | `@capacitor-mlkit/barcode-scanning` | Native barcode scanning for the SKU field and inventory search (Android only) |
+| `@capacitor/local-notifications` | Native low-stock push notifications (Android only) |
 | `vite` *(dev)* | Dev server / build tool |
 | `@vitejs/plugin-react` *(dev)* | React support for Vite |
 | `typescript` *(dev)* | Type checking (`tsc -b`) |

@@ -3,13 +3,27 @@ import type { FormEvent } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { Camera } from '@capacitor/camera'
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning'
+import { LocalNotifications } from '@capacitor/local-notifications'
 import './App.css'
 import * as api from './api'
+import type { NotificationFrequency } from './api'
 
 // Native camera/gallery capture only makes sense inside the wrapped Android
 // app -- on the plain website there's no native bridge to call, so that case
-// keeps using the regular HTML file input instead.
+// keeps using the regular HTML file input instead. Low-stock push
+// notifications are gated on the same flag, for the same reason.
 const isNativePlatform = Capacitor.isNativePlatform()
+
+// Throttles how often a repeat low-stock notification can fire while the
+// condition persists, based on the user's chosen frequency. Device-local
+// (not account data), so it lives in localStorage rather than on the server.
+const LOW_STOCK_NOTIFIED_AT_KEY = 'lowStockNotifiedAt'
+const LOW_STOCK_NOTIFICATION_ID = 1
+const NOTIFICATION_FREQUENCY_MS: Record<NotificationFrequency, number> = {
+  immediate: 0,
+  hourly: 60 * 60 * 1000,
+  daily: 24 * 60 * 60 * 1000,
+}
 
 // Camera/gallery results come back as base64 thumbnails, not File objects --
 // this converts one into a File so it can flow through the same
@@ -472,6 +486,13 @@ function App() {
   // current banner image, computed below. Defaults to white to match the
   // page's look with no banner set.
   const [bannerTextColor, setBannerTextColor] = useState<'white' | 'black'>('white')
+  // Low-stock notification preferences -- persisted server-side (see
+  // saveCategorySettings) and hydrated from user.settings on login. Only
+  // actually delivered on Android (see the effect below), but the settings
+  // themselves are account-wide like the rest of Company details.
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false)
+  const [notificationFrequency, setNotificationFrequency] =
+    useState<NotificationFrequency>('immediate')
   // A photo the user just picked but hasn't saved yet -- held locally and
   // only actually uploaded on submit, so cancelling the modal never leaves
   // an orphaned file on the server.
@@ -553,10 +574,17 @@ function App() {
           nameById[c._id] = c.name
         })
         setCategoryIdByName(idByName)
-        const names = mergeCategoryNames(
-          categories,
-          fetchedCategories.map((c) => c.name),
-        )
+        // Only fall back to the starter category list for a genuinely blank
+        // account (nothing saved yet) -- once the account has any real
+        // categories, trust that list exactly. Unioning the starter list in
+        // unconditionally would silently resurrect a starter category the
+        // user had deliberately removed in Settings, since removing one that
+        // was never actually created server-side is a no-op there's nothing
+        // to delete.
+        const names =
+          fetchedCategories.length > 0
+            ? fetchedCategories.map((c) => c.name)
+            : mergeCategoryNames(categories, [])
         setBusinessCategories(names)
         setCategoryInput(names.join(', '))
 
@@ -574,6 +602,51 @@ function App() {
       cancelled = true
     }
   }, [loggedIn])
+
+  // Fires a local push notification when any item is at/below its low-stock
+  // threshold, gated on the "Enable notifications" setting and only ever
+  // delivered on Android -- there's no native notification bridge on the
+  // plain website. Notifications only fire while the app is running (a
+  // check runs immediately on load/whenever items change, plus a once-a-
+  // minute recheck so hourly/daily reminders still land if the item list
+  // itself hasn't changed); there's no server-side push infrastructure here,
+  // so nothing fires while the app is fully closed.
+  useEffect(() => {
+    if (!isNativePlatform || !loggedIn || !notificationsEnabled) return
+
+    const checkAndNotify = async () => {
+      const due = items.filter((item) => item.quantity <= item.min)
+      if (due.length === 0) return
+
+      const minGapMs = NOTIFICATION_FREQUENCY_MS[notificationFrequency]
+      const lastNotifiedAt = Number(localStorage.getItem(LOW_STOCK_NOTIFIED_AT_KEY) || 0)
+      if (Date.now() - lastNotifiedAt < minGapMs) return
+
+      const permission = await LocalNotifications.checkPermissions()
+      if (permission.display !== 'granted') return
+
+      const names = due
+        .slice(0, 3)
+        .map((item) => item.name)
+        .join(', ')
+      const extra = due.length > 3 ? ` and ${due.length - 3} more` : ''
+
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id: LOW_STOCK_NOTIFICATION_ID,
+            title: 'Low stock alert',
+            body: `${due.length} item${due.length === 1 ? '' : 's'} below threshold: ${names}${extra}`,
+          },
+        ],
+      })
+      localStorage.setItem(LOW_STOCK_NOTIFIED_AT_KEY, String(Date.now()))
+    }
+
+    checkAndNotify()
+    const interval = window.setInterval(checkAndNotify, 60000)
+    return () => window.clearInterval(interval)
+  }, [loggedIn, notificationsEnabled, notificationFrequency, items])
 
   // ---------------- Derived values ----------------
   const lowItems = items.filter((item) => item.quantity <= item.min)
@@ -599,12 +672,30 @@ function App() {
     const { token, user } = await api.login(email, password)
     localStorage.setItem('token', token)
     // Your User model doesn't store a display name, so this derives one from
-    // the email address (e.g. "alex.morgan@coffeehour.com" -> "Alex Morgan").
+    // the email address (e.g. "alex.morgan@coffeehour.com" -> "Alex Morgan")
+    // as a fallback for accounts that haven't set a manager name yet.
     const displayName = user.email
       .split('@')[0]
       .replace(/[._-]+/g, ' ')
       .replace(/\b\w/g, (c) => c.toUpperCase())
-    setCompany((current) => ({ ...current, manager: displayName || current.manager }))
+    if (user.settings) {
+      setCompany({
+        name: user.settings.companyName,
+        type: user.settings.businessType,
+        manager: user.settings.managerName,
+        accent: user.settings.accentColor,
+      })
+      setNotificationsEnabled(user.settings.notificationsEnabled)
+      setNotificationFrequency(user.settings.notificationFrequency)
+      // Settings synced from the server (e.g. enabled on another device)
+      // still need this device's own OS-level permission grant -- request it
+      // now rather than waiting for the user to re-toggle the switch here.
+      if (user.settings.notificationsEnabled && isNativePlatform) {
+        LocalNotifications.requestPermissions().catch(() => {})
+      }
+    } else {
+      setCompany((current) => ({ ...current, manager: displayName || current.manager }))
+    }
     setBannerImage(user.bannerImage || undefined)
     setLoggedIn(true)
   }
@@ -777,8 +868,14 @@ function App() {
       .split(',')
       .map((value) => value.trim())
       .filter(Boolean)
-    const toAdd = values.filter((v) => !businessCategories.includes(v))
-    const toRemove = businessCategories.filter((v) => !values.includes(v))
+    // Diffed against categoryIdByName (what's actually persisted server-side)
+    // rather than businessCategories, which can include starter categories
+    // that are only ever shown as suggestions and never actually saved --
+    // otherwise a starter category kept in the input would never get a real
+    // row created for it, and removing one would look like it saved but
+    // reappear on the next load since there was nothing to delete.
+    const toAdd = values.filter((v) => !categoryIdByName[v])
+    const toRemove = Object.keys(categoryIdByName).filter((name) => !values.includes(name))
     try {
       const newIds: Record<string, string> = {}
       for (const name of toAdd) {
@@ -789,6 +886,14 @@ function App() {
         const id = categoryIdByName[name]
         if (id) await api.deleteCategory(id)
       }
+      await api.updateSettings({
+        companyName: company.name,
+        businessType: company.type,
+        managerName: company.manager,
+        accentColor: company.accent,
+        notificationsEnabled,
+        notificationFrequency,
+      })
       setCategoryIdByName((current) => ({ ...current, ...newIds }))
       setBusinessCategories(values)
       if (values.length && !values.includes(draft.category))
@@ -797,6 +902,27 @@ function App() {
       window.setTimeout(() => setSaved(false), 2200)
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Could not update categories')
+    }
+  }
+
+  // Flips the local toggle immediately (still requires hitting "Save
+  // customization" to persist) and, on Android, asks for the OS-level
+  // notification permission right away -- prompting at the moment of intent
+  // rather than silently deferring it to whenever the next alert would fire.
+  const handleToggleNotifications = async (nextEnabled: boolean) => {
+    setNotificationsEnabled(nextEnabled)
+    if (nextEnabled && isNativePlatform) {
+      try {
+        const result = await LocalNotifications.requestPermissions()
+        if (result.display !== 'granted') {
+          setLoadError(
+            'Notification permission was denied. Enable it in Android system settings to receive low-stock alerts.',
+          )
+        }
+      } catch {
+        // Permission prompt failing shouldn't block the setting itself --
+        // checkAndNotify() re-checks permission before ever firing.
+      }
     }
   }
 
@@ -1286,6 +1412,53 @@ function App() {
               >
                 Restore demo branding
               </button>
+            </div>
+            <div className="settings-card">
+              <div className="settings-title">
+                <span className="settings-symbol">
+                  <Icon name="alert" />
+                </span>
+                <div>
+                  <h2>Notifications</h2>
+                  <p>Get alerted when an item falls to or below its low-stock threshold.</p>
+                </div>
+              </div>
+              <div className="settings-toggle-row first">
+                <div>
+                  <strong>Enable notifications</strong>
+                  <p>Send a low-stock alert for this account.</p>
+                </div>
+                <button
+                  type="button"
+                  className={notificationsEnabled ? 'toggle-switch on' : 'toggle-switch'}
+                  role="switch"
+                  aria-checked={notificationsEnabled}
+                  aria-label="Toggle low-stock notifications"
+                  onClick={() => handleToggleNotifications(!notificationsEnabled)}
+                >
+                  <span />
+                </button>
+              </div>
+              <label>
+                Notification frequency
+                <select
+                  value={notificationFrequency}
+                  disabled={!notificationsEnabled}
+                  onChange={(event) =>
+                    setNotificationFrequency(event.target.value as NotificationFrequency)
+                  }
+                >
+                  <option value="immediate">As soon as an item is low</option>
+                  <option value="hourly">At most once an hour</option>
+                  <option value="daily">At most once a day</option>
+                </select>
+              </label>
+              {!isNativePlatform && (
+                <p className="field-help">
+                  Push notifications are only delivered in the Android app -- this setting still
+                  saves for when you use it there.
+                </p>
+              )}
             </div>
             <div className="settings-card danger-zone">
               <div className="settings-title">
