@@ -1,0 +1,35 @@
+<!--
+  Full brand mark: the .brand-mark span (rounded-square background) plus the
+  coffee Icon it contains, flattened into one static SVG with the CSS colors
+  baked in as real values (a standalone file can't resolve currentColor or
+  CSS classes on its own).
+
+  Color used here matches the sidebar's default brand-mark, which falls back
+  to the company-accent custom property, default value #a9642e. This is
+  also the app's main accent color (same as .primary buttons).
+
+  Two other contexts use a different background on the same shape:
+    .brand-mark, default color #bb7b3d (e.g. login page's .mobile-brand)
+    .brand-light .brand-mark color #c38143 (login page's dark hero section)
+  Swap the rect fill below to reuse either of those instead.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="38" height="38" viewBox="0 0 38 38">
+  <!-- .brand-mark: width/height 38px, border-radius 11px, background color -->
+  <rect width="38" height="38" rx="11" fill="#a9642e" />
+  <!-- .brand-mark .icon: 22x22, centered via display:grid;place-items:center
+       -> (38 - 22) / 2 = 8px offset, then scaled down from the icon's
+       original 24x24 coordinate space to its 22x22 rendered size.
+       No nested <svg> here, since some viewers don't render those; this
+       uses a single top-level <svg> with a transform instead. -->
+  <g
+    transform="translate(8, 8) scale(0.91667)"
+    fill="none"
+    stroke="#fff"
+    stroke-width="1.8"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M4 8h13v7a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V8Z" />
+    <path d="M17 10h1a3 3 0 0 1 0 6h-1M7 4c0 1 1 1 1 2M11 3c0 1 1 1 1 2" />
+  </g>
+</svg>

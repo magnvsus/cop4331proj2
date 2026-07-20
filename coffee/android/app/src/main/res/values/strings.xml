@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">InventoryHub</string>
+    <string name="title_activity_main">InventoryHub</string>
+    <string name="package_name">com.Group25.InventoryHub</string>
+    <string name="custom_url_scheme">com.Group25.InventoryHub</string>
+</resources>

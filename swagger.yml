@@ -3,216 +3,597 @@ swagger: "2.0"
 # Metadata
 info:
   description: 'Group 25 Large Project - Coffee - API Documentation'
-  version: '0.0.1'
+  version: '1.0.0'
   title: 'Coffee'
   contact:
-    email:
-      - 'mi993440@ucf.edu'
+    email: 'mi993440@ucf.edu'
+
+tags:
+  - name: auth
+    description: Registration, login, and account-level settings
+  - name: categories
+    description: Inventory categories
+  - name: items
+    description: Inventory items
+
+securityDefinitions:
+  BearerAuth:
+    type: apiKey
+    name: Authorization
+    in: header
+    description: 'JWT auth header. Format: "Bearer <token>"'
 
 # Docs
 paths:
-  /api/login:
+  /api/auth/register:
     post:
       tags:
-      - users
-      summary: Log in page for users
-      description: Authenticates users
-      operationId: loginPage
+        - auth
+      summary: Register a new account
+      description: >
+        Creates a new user account and emails a verification link to it. Does not log the
+        user in -- call /api/auth/login afterward to get a token. The account can be used
+        before verifying; isVerified just tracks whether the link has been clicked yet.
+      operationId: register
       consumes:
-      - application/json
+        - application/json
       produces:
-      - application/json
+        - application/json
       parameters:
-      - in: body
-        name: loginItem
-        description: login
-        schema:
-          $ref: '#/definitions/login'
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/registerRequest'
+      responses:
+        201:
+          description: Created
+          schema:
+            $ref: '#/definitions/messageResponse'
+        400:
+          description: Bad Request (missing fields, password too short, or email already registered)
+          schema:
+            $ref: '#/definitions/errorResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
+
+  /api/auth/login:
+    post:
+      tags:
+        - auth
+      summary: Log in
+      description: Authenticates a user and returns a JWT plus the account's profile/settings.
+      operationId: login
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/loginRequest'
       responses:
         200:
           description: OK
           schema:
-            $ref: '#/definitions/responseLogin'
-        400:
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/responseErrorRequest'
+            $ref: '#/definitions/loginResponse'
         401:
-          description: Unauthorized
+          description: Unauthorized (invalid email or password)
           schema:
-            $ref: '#/definitions/responseErrorAuth'
+            $ref: '#/definitions/errorResponse'
         500:
           description: Server Error
           schema:
-            $ref: '#/definitions/responseErrorServer'
+            $ref: '#/definitions/errorResponse'
 
-  /api/register:
-    post:
+  /api/auth/me:
+    get:
       tags:
-      - users
-      summary: Registers users
-      description: Registers users in database
-      operationId: Register
-      consumes:
-      - application/json
+        - auth
+      summary: Get the current user
+      description: >
+        Restores a session from a stored token (e.g. after a page refresh) without
+        re-prompting for a password. Returns the same user/settings shape as login.
+      operationId: getCurrentUser
+      security:
+        - BearerAuth: []
       produces:
-      - application/json
-      parameters:
-      - in: body
-        name: register
-        description: register
-        schema:
-          $ref: '#/definitions/register'
+        - application/json
       responses:
         200:
           description: OK
           schema:
-            $ref: '#/definitions/responseGeneric'
-        201:
-          description: Created
-          schema:
-            $ref: '#/definitions/responseGeneric'
-        400:
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/responseErrorRequest'
-        500:
-          description: Server Error
-          schema:
-            $ref: '#/definitions/responseErrorServer'
-
-  /api/itemAdd:
-    post:
-      tags:
-      - items
-      summary: Add items
-      operationId: itemAdd
-      description: Adds items to personal inventory
-      consumes:
-      - application/json
-      produces:
-      - application/json
-      parameters:
-      - in: body
-        name: itemAdd
-        description: Add item
-        schema:
-          $ref: '#/definitions/itemAdd'
-      responses:
-        201:
-          description: Created
-          schema:
-            $ref: '#/definitions/responseGeneric'
-        400:
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/responseErrorRegistration'
-        500:
-          description: Server Error
-          schema:
-            $ref: '#/definitions/responseErrorServer'
-
-  /api/itemSearch:
-    post:
-      tags:
-      - items
-      summary: Searches for items
-      operationId: itemSearch
-      description: Searches items from personal inventory
-      consumes:
-      - application/json
-      produces:
-      - application/json
-      parameters:
-      - in: body
-        name: itemSearch
-        description: Search item
-        schema:
-          $ref: '#/definitions/itemSearch'
-      responses:
-        200:
-          description: OK
-          schema:
-            $ref: '#/definitions/responseSearch'
-        400:
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/responseErrorRequest'
+            $ref: '#/definitions/userResponse'
         404:
-          description: Contact Not Found
+          description: User Not Found
           schema:
-            $ref: '#/definitions/responseErrorNotFound'
+            $ref: '#/definitions/errorResponse'
         500:
           description: Server Error
           schema:
-            $ref: '#/definitions/responseErrorServer'
+            $ref: '#/definitions/errorResponse'
 
-  /api/itemRemove:
-    post:
+  /api/auth/verify-email/{token}:
+    get:
       tags:
-      - items
-      summary: Removes item
-      operationId: contactDelete
-      description: Removes items from personal inventory
+        - auth
+      summary: Verify an account via its emailed link
+      description: >
+        Meant to be opened directly from the verification email, not called as a JSON API --
+        it renders a plain HTML confirmation page rather than returning JSON. The token is a
+        one-time value that expires 24 hours after registration.
+      operationId: verifyEmail
       produces:
-      - application/json
+        - text/html
       parameters:
-      - in: body
-        name: itemDelete
-        description: Item deletion
-        schema:
-          $ref: '#/definitions/itemDelete'
+        - in: path
+          name: token
+          required: true
+          type: string
       responses:
-        204:
-          description: No Content
+        200:
+          description: OK -- account verified. Returns an HTML confirmation page.
           schema:
-            $ref: '#/definitions/responseGeneric'
+            type: string
         400:
-          description: Bad Request
+          description: Bad Request -- token invalid or expired. Returns an HTML error page.
           schema:
-            $ref: '#/definitions/responseErrorRequest'
+            type: string
+        500:
+          description: Server Error. Returns an HTML error page.
+          schema:
+            type: string
+
+  /api/auth/resend-verification:
+    post:
+      tags:
+        - auth
+      summary: Resend the account verification email
+      description: >
+        Issues a new verification token (invalidating the previous one) and re-sends it.
+        Rate-limited to once per 60 seconds per account, enforced server-side regardless
+        of any client-side cooldown.
+      operationId: resendVerification
+      security:
+        - BearerAuth: []
+      produces:
+        - application/json
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/messageResponse'
+        400:
+          description: Bad Request -- account is already verified
+          schema:
+            $ref: '#/definitions/errorResponse'
+        404:
+          description: User Not Found
+          schema:
+            $ref: '#/definitions/errorResponse'
+        429:
+          description: Too Many Requests -- cooldown still active
+          schema:
+            $ref: '#/definitions/resendCooldownResponse'
         500:
           description: Server Error
           schema:
-            $ref: '#/definitions/responseErrorServer'
+            $ref: '#/definitions/errorResponse'
 
-  /api/itemUpdate:
+  /api/auth/banner:
+    patch:
+      tags:
+        - auth
+      summary: Update the account banner image
+      description: Sets (or clears, with an empty string) the account's banner image. Pass the relative path returned by /api/items/upload.
+      operationId: updateBanner
+      security:
+        - BearerAuth: []
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/updateBannerRequest'
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/userResponse'
+        404:
+          description: User Not Found
+          schema:
+            $ref: '#/definitions/errorResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
+
+  /api/auth/settings:
+    patch:
+      tags:
+        - auth
+      summary: Update account dashboard settings
+      description: >
+        Partially updates the account's company/branding and low-stock notification
+        settings. Only the fields present in the body are changed; anything outside
+        the whitelisted fields is silently ignored.
+      operationId: updateSettings
+      security:
+        - BearerAuth: []
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/updateSettingsRequest'
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/userResponse'
+        400:
+          description: Bad Request (invalid/out-of-range field, or no valid fields provided)
+          schema:
+            $ref: '#/definitions/errorResponse'
+        404:
+          description: User Not Found
+          schema:
+            $ref: '#/definitions/errorResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
+
+  /api/auth/account:
+    delete:
+      tags:
+        - auth
+      summary: Delete the logged-in account
+      description: Permanently deletes the account along with all of its items, categories, and uploaded files (item photos, banner). Cannot be undone.
+      operationId: deleteAccount
+      security:
+        - BearerAuth: []
+      produces:
+        - application/json
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/messageResponse'
+        404:
+          description: User Not Found
+          schema:
+            $ref: '#/definitions/errorResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
+
+  /api/categories/addcategory:
     post:
       tags:
-      - items
-      summary: Updates items
-      operationId: itemUpdate
-      description: Updates items in personal inventory
+        - categories
+      summary: Create a category
+      operationId: addCategory
+      security:
+        - BearerAuth: []
+      consumes:
+        - application/json
       produces:
-      - application/json
+        - application/json
       parameters:
-      - in: body
-        name: itemUpdate
-        description: Item update
-        schema:
-          $ref: '#/definitions/itemUpdate'
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/categoryCreateRequest'
       responses:
         201:
           description: Created
           schema:
-            $ref: '#/definitions/responseGeneric'
+            $ref: '#/definitions/categoryResponse'
         400:
-          description: Bad Request
+          description: Bad Request (missing name, or a duplicate category name for this account)
           schema:
-            $ref: '#/definitions/responseErrorRequest'
+            $ref: '#/definitions/errorResponse'
         500:
           description: Server Error
           schema:
-            $ref: '#/definitions/responseErrorServer'
+            $ref: '#/definitions/errorResponse'
 
+  /api/categories/searchcategories:
+    post:
+      tags:
+        - categories
+      summary: Search categories
+      description: Case-insensitive search over the account's categories. An empty/omitted search returns all of them.
+      operationId: searchCategories
+      security:
+        - BearerAuth: []
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: false
+          schema:
+            $ref: '#/definitions/searchRequest'
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/categorySearchResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
 
+  /api/categories/updatecategory/{id}:
+    patch:
+      tags:
+        - categories
+      summary: Rename a category
+      operationId: updateCategory
+      security:
+        - BearerAuth: []
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: id
+          required: true
+          type: string
+          description: Category ID
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/categoryCreateRequest'
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/categoryResponse'
+        400:
+          description: Bad Request (missing name, or a duplicate category name for this account)
+          schema:
+            $ref: '#/definitions/errorResponse'
+        404:
+          description: Category Not Found or Unauthorized
+          schema:
+            $ref: '#/definitions/errorResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
+
+  /api/categories/deletecategory/{id}:
+    delete:
+      tags:
+        - categories
+      summary: Delete a category
+      operationId: deleteCategory
+      security:
+        - BearerAuth: []
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: id
+          required: true
+          type: string
+          description: Category ID
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/messageResponse'
+        404:
+          description: Category Not Found or Unauthorized
+          schema:
+            $ref: '#/definitions/errorResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
+
+  /api/items/additem:
+    post:
+      tags:
+        - items
+      summary: Add an item
+      operationId: addItem
+      security:
+        - BearerAuth: []
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/itemCreateRequest'
+      responses:
+        201:
+          description: Created
+          schema:
+            $ref: '#/definitions/itemResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
+
+  /api/items/searchitems:
+    post:
+      tags:
+        - items
+      summary: Search items
+      description: Case-insensitive search over the account's items, by name. An empty/omitted search returns all of them.
+      operationId: searchItems
+      security:
+        - BearerAuth: []
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          required: false
+          schema:
+            $ref: '#/definitions/searchRequest'
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/itemSearchResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
+
+  /api/items/updateitem/{id}:
+    patch:
+      tags:
+        - items
+      summary: Update an item
+      description: Partially updates an item. If pictureURL changes, the item's previous uploaded photo is deleted server-side.
+      operationId: updateItem
+      security:
+        - BearerAuth: []
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: id
+          required: true
+          type: string
+          description: Item ID
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/itemUpdateRequest'
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/itemResponse'
+        404:
+          description: Item Not Found or Unauthorized
+          schema:
+            $ref: '#/definitions/errorResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
+
+  /api/items/deleteitem/{id}:
+    delete:
+      tags:
+        - items
+      summary: Delete an item
+      description: Deletes the item and, if it had one, its uploaded photo.
+      operationId: deleteItem
+      security:
+        - BearerAuth: []
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: id
+          required: true
+          type: string
+          description: Item ID
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/messageResponse'
+        404:
+          description: Item Not Found or Unauthorized
+          schema:
+            $ref: '#/definitions/errorResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
+
+  /api/items/upload:
+    post:
+      tags:
+        - items
+      summary: Upload an item (or banner) photo
+      description: Accepts an image, resizes/compresses it server-side, and returns a relative /uploads/... URL to store as an item's pictureURL (or the account's bannerImage).
+      operationId: uploadImage
+      security:
+        - BearerAuth: []
+      consumes:
+        - multipart/form-data
+      produces:
+        - application/json
+      parameters:
+        - in: formData
+          name: image
+          type: file
+          required: true
+          description: Image file, max 8MB
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/uploadResponse'
+        400:
+          description: Bad Request (no file was uploaded, file is not an image, or it exceeds the 8MB limit)
+          schema:
+            $ref: '#/definitions/errorResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
 
 definitions:
-  login:
+  # ---------------- Auth ----------------
+  registerRequest:
     type: object
     required:
-    - email
-    - password
+      - email
+      - password
+    properties:
+      email:
+        type: string
+        example: jdoe@email.com
+      password:
+        type: string
+        description: Minimum 6 characters
+        example: Password123
+
+  loginRequest:
+    type: object
+    required:
+      - email
+      - password
     properties:
       email:
         type: string
@@ -221,156 +602,298 @@ definitions:
         type: string
         example: Password123
 
-  register:
+  accountSettings:
+    type: object
+    properties:
+      companyName:
+        type: string
+        example: Coffee Hour
+      businessType:
+        type: string
+        example: Coffee shop
+      managerName:
+        type: string
+        example: Alex Morgan
+      accentColor:
+        type: string
+        description: Hex color code
+        example: '#a9642e'
+      notificationsEnabled:
+        type: boolean
+        example: false
+      notificationFrequency:
+        type: string
+        enum: [immediate, hourly, daily]
+        example: immediate
+
+  updateSettingsRequest:
+    type: object
+    description: All fields are optional -- only the ones present in the body are updated.
+    properties:
+      companyName:
+        type: string
+        example: Coffee Hour
+      businessType:
+        type: string
+        example: Coffee shop
+      managerName:
+        type: string
+        example: Alex Morgan
+      accentColor:
+        type: string
+        description: Hex color code
+        example: '#a9642e'
+      notificationsEnabled:
+        type: boolean
+        example: true
+      notificationFrequency:
+        type: string
+        enum: [immediate, hourly, daily]
+        example: hourly
+
+  updateBannerRequest:
     type: object
     required:
-    - email
-    - password
+      - bannerImage
     properties:
+      bannerImage:
+        type: string
+        description: Relative /uploads/... path from /api/items/upload, or an empty string to remove the banner.
+        example: /uploads/1a2b3c.jpg
+
+  user:
+    type: object
+    properties:
+      id:
+        type: string
+        example: '65123abc4567def890123456'
       email:
         type: string
         example: jdoe@email.com
-      password:
+      isVerified:
+        type: boolean
+        example: false
+      bannerImage:
         type: string
-        example: Password123
+        example: /uploads/1a2b3c.jpg
+      settings:
+        $ref: '#/definitions/accountSettings'
 
-  itemAdd:
+  loginResponse:
     type: object
-    required:
-    - _id
-    - accountID
-    - categoryID
-    - name
-    - amount
-    - pictureURL
-    - threshold
+    properties:
+      token:
+        type: string
+        example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+      user:
+        $ref: '#/definitions/user'
+      error:
+        type: string
+        example: ""
+
+  userResponse:
+    type: object
+    properties:
+      user:
+        $ref: '#/definitions/user'
+      error:
+        type: string
+        example: ""
+
+  # ---------------- Categories ----------------
+  category:
+    type: object
     properties:
       _id:
-        type: integer
-        example: 123
+        type: string
+        example: '65123abc4567def890123456'
       accountID:
-        type: integer
-        example: 123
-      categoryID:
-        type: integer
-        example: 123
+        type: string
+        example: '65123abc4567def890123456'
       name:
         type: string
-        example: "Item"
+        example: Dairy
+
+  categoryCreateRequest:
+    type: object
+    required:
+      - name
+    properties:
+      name:
+        type: string
+        example: Dairy
+
+  searchRequest:
+    type: object
+    properties:
+      search:
+        type: string
+        description: Optional; blank/omitted returns everything.
+        example: dai
+
+  categoryResponse:
+    type: object
+    properties:
+      category:
+        $ref: '#/definitions/category'
+      error:
+        type: string
+        example: ""
+
+  categorySearchResponse:
+    type: object
+    properties:
+      results:
+        type: array
+        items:
+          $ref: '#/definitions/category'
+      error:
+        type: string
+        example: ""
+
+  # ---------------- Items ----------------
+  item:
+    type: object
+    properties:
+      _id:
+        type: string
+        example: '65123abc4567def890123456'
+      accountID:
+        type: string
+        example: '65123abc4567def890123456'
+      categoryID:
+        type: string
+        example: '65123abc4567def890123456'
+      name:
+        type: string
+        example: Oat milk
+      sku:
+        type: string
+        example: OAT-001
+      unit:
+        type: string
+        example: units
       amount:
-        type: integer
-        example: 123
+        type: number
+        example: 12
       pictureURL:
         type: string
-        example: "site.com/image.jpg"
-      threshold:
-        type: integer
-        example: 123
+        example: /uploads/1a2b3c.jpg
+      lowStockThreshold:
+        type: number
+        example: 5
 
-  itemSearch:
+  itemCreateRequest:
     type: object
     required:
-    - accountID
-    - search
+      - name
+      - categoryID
     properties:
-      _id:
-        type: integer
-        example: 123
-      search:
+      name:
         type: string
-        example: "item"
+        example: Oat milk
+      sku:
+        type: string
+        example: OAT-001
+      unit:
+        type: string
+        example: units
+      amount:
+        type: number
+        example: 12
+      categoryID:
+        type: string
+        example: '65123abc4567def890123456'
+      pictureURL:
+        type: string
+        example: /uploads/1a2b3c.jpg
+      lowStockThreshold:
+        type: number
+        example: 5
 
-  itemDelete:
+  itemUpdateRequest:
     type: object
-    required:
-    - _id
-    - accountID
+    description: All fields are optional -- only the ones present in the body are updated.
     properties:
-      accountID:
-        type: integer
-        example: 123
-      _id:
-        type: integer
-        example: 123
+      name:
+        type: string
+        example: Oat milk
+      sku:
+        type: string
+        example: OAT-001
+      unit:
+        type: string
+        example: units
+      amount:
+        type: number
+        example: 12
+      categoryID:
+        type: string
+        example: '65123abc4567def890123456'
+      pictureURL:
+        type: string
+        example: /uploads/1a2b3c.jpg
+      lowStockThreshold:
+        type: number
+        example: 5
 
-  itemUpdate:
-    type: object
-    required:
-    - _id
-    - accountID
-    - categoryID
-    - name
-    - amount
-    - pictureURL
-    - threshold
-    properties:
-      UserID:
-        type: integer
-        example: 123
-
-
-  #Responses
-  responseLogin:
+  itemResponse:
     type: object
     properties:
-      _id:
-        type: integer
-        example: 123
+      item:
+        $ref: '#/definitions/item'
       error:
         type: string
         example: ""
 
-  responseSearch:
-    type: object
-    required:
-    - _id
-    - search
-    properties:
-      _id:
-        type: integer
-        example: 123
-      search:
-        type: string
-        example: "item"
-
-  responseGeneric:
+  itemSearchResponse:
     type: object
     properties:
-      Error:
+      results:
+        type: array
+        items:
+          $ref: '#/definitions/item'
+      error:
         type: string
         example: ""
 
-  responseErrorRequest:
+  uploadResponse:
+    type: object
+    properties:
+      pictureURL:
+        type: string
+        example: /uploads/1a2b3c.jpg
+      error:
+        type: string
+        example: ""
+
+  # ---------------- Shared ----------------
+  messageResponse:
+    type: object
+    properties:
+      message:
+        type: string
+        example: OK
+      error:
+        type: string
+        example: ""
+
+  errorResponse:
     type: object
     properties:
       error:
         type: string
-        example: "All fields must be filled."
+        example: Something went wrong.
+      details:
+        type: string
+        example: Additional error detail from the server, when available.
 
-  responseErrorAuth:
+  resendCooldownResponse:
     type: object
     properties:
       error:
         type: string
-        example: "Invalid Credentials"
-
-  responseErrorServer:
-    type: object
-    properties:
-      error:
-        type: string
-        example: "Internal server error."
-
-  responseErrorRegistration:
-    type: object
-    properties:
-      Error:
-        type: string
-        example: "Registration failed"
-
-  responseErrorNotFound:
-    type: object
-    properties:
-      Error:
-        type: string
-        example: "No Records Found"
+        example: Please wait before requesting another verification email
+      retryAfterSeconds:
+        type: integer
+        example: 42
