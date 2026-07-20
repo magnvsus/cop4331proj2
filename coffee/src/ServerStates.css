@@ -1,0 +1,7 @@
+.api-message{margin:0 0 14px;padding:10px 12px;border-radius:8px;font-size:11px;line-height:1.4}
+.api-message.error{color:#8e2d26;background:#fae8e5;border:1px solid #edc7c2}
+.api-message.success{color:#326644;background:#e7f4eb;border:1px solid #c6e2cf}
+.api-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px;padding:12px 15px;border:1px solid #edc7c2;border-radius:9px;background:#fae8e5;color:#8e2d26;font-size:11px}
+.api-banner button,.auth-switch{border:0;background:transparent;color:#9a6234;font-weight:700;font-size:11px;cursor:pointer}
+.auth-switch{display:block;margin:15px auto 0}
+button:disabled{cursor:not-allowed;opacity:.6}
