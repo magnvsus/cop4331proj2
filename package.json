@@ -4,17 +4,13 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon server.js"
+    "test": "jest && npm test --prefix coffee",
+    "start": "nodemon backend/server.js"
   },
   "author": "",
   "license": "ISC",
-  "dependencies": {
-    "cors": "^2.8.6",
-    "express": "^4.22.2",
-    "mongodb": "^7.4.0"
-  },
   "devDependencies": {
+    "jest": "^30.4.2",
     "nodemon": "^3.1.14"
   }
 }
