@@ -472,6 +472,20 @@ function App() {
   const [uploadingBanner, setUploadingBanner] = useState(false)
   const [showBannerModal, setShowBannerModal] = useState(false)
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false)
+  // Shown once per login when the account hasn't clicked its verification
+  // email yet -- purely a reminder (verification doesn't block anything
+  // else in the app), so dismissing it just closes it.
+  const [showVerifyModal, setShowVerifyModal] = useState(false)
+  const [accountEmail, setAccountEmail] = useState('')
+  const [accountVerified, setAccountVerified] = useState(false)
+  // Timestamp (ms) the resend button becomes usable again -- persisted to
+  // localStorage (keyed by email) so the cooldown survives a page refresh,
+  // and re-synced from the server's retryAfterSeconds if it ever disagrees
+  // (e.g. localStorage was cleared, or this is a second device).
+  const [resendCooldownUntil, setResendCooldownUntil] = useState(0)
+  const [resendingVerification, setResendingVerification] = useState(false)
+  const [resendError, setResendError] = useState('')
+  const [resendTick, setResendTick] = useState(() => Date.now())
   const [deletingAccount, setDeletingAccount] = useState(false)
   // On narrow/phone-width screens the sidebar collapses to a top bar that
   // only has room for the active nav button -- this drives a dropdown to
@@ -697,6 +711,12 @@ function App() {
       setCompany((current) => ({ ...current, manager: displayName || current.manager }))
     }
     setBannerImage(user.bannerImage || undefined)
+    setAccountEmail(user.email)
+    setAccountVerified(Boolean(user.isVerified))
+    setShowVerifyModal(!user.isVerified)
+    setResendCooldownUntil(
+      Number(localStorage.getItem(`verifyResendCooldownUntil:${user.email}`) || 0),
+    )
     setLoggedIn(true)
   }
 
@@ -706,6 +726,7 @@ function App() {
     setItems([])
     setPage('dashboard')
     setBannerImage(undefined)
+    setShowVerifyModal(false)
   }
 
   const handleDeleteAccount = async () => {
@@ -923,6 +944,51 @@ function App() {
         // Permission prompt failing shouldn't block the setting itself --
         // checkAndNotify() re-checks permission before ever firing.
       }
+    }
+  }
+
+  // Ticks once a second while the resend cooldown is active, purely to
+  // re-render the "Resend available in Xs" countdown -- self-clears once the
+  // cooldown has actually elapsed so it doesn't tick forever in the background.
+  useEffect(() => {
+    if (resendCooldownUntil <= Date.now()) return
+    const interval = window.setInterval(() => {
+      const now = Date.now()
+      setResendTick(now)
+      if (now >= resendCooldownUntil) window.clearInterval(interval)
+    }, 1000)
+    return () => window.clearInterval(interval)
+  }, [resendCooldownUntil])
+
+  const resendCooldownSecondsLeft = Math.max(
+    0,
+    Math.ceil((resendCooldownUntil - resendTick) / 1000),
+  )
+
+  const handleResendVerification = async () => {
+    setResendError('')
+    setResendingVerification(true)
+    try {
+      const result = await api.resendVerification()
+      if (result.ok) {
+        const until = Date.now() + 60_000
+        setResendCooldownUntil(until)
+        localStorage.setItem(`verifyResendCooldownUntil:${accountEmail}`, String(until))
+      } else {
+        setResendError(result.message)
+        // Sync to the server's authoritative cooldown even on failure -- it
+        // may be ahead of what's in localStorage (e.g. a second device, or
+        // localStorage got cleared).
+        if (result.retryAfterSeconds) {
+          const until = Date.now() + result.retryAfterSeconds * 1000
+          setResendCooldownUntil(until)
+          localStorage.setItem(`verifyResendCooldownUntil:${accountEmail}`, String(until))
+        }
+      }
+    } catch (err) {
+      setResendError(err instanceof Error ? err.message : 'Could not resend verification email')
+    } finally {
+      setResendingVerification(false)
     }
   }
 
@@ -1313,6 +1379,42 @@ function App() {
           inventoryPanel
         ) : (
           <section className="settings-grid">
+            <div className="settings-card">
+              <div className="settings-title">
+                <span className="settings-symbol">
+                  <Icon name="alert" />
+                </span>
+                <div>
+                  <h2>Account verification</h2>
+                  <p>Confirms this is really your email address.</p>
+                </div>
+              </div>
+              <div className={accountVerified ? 'verify-status verified' : 'verify-status'}>
+                <strong>{accountVerified ? 'Verified' : 'Not verified'}</strong>
+                <p>
+                  {accountVerified
+                    ? `${accountEmail} has been verified.`
+                    : `We sent a verification link to ${accountEmail}. Check your inbox (and spam folder) to verify your account.`}
+                </p>
+              </div>
+              {!accountVerified && (
+                <>
+                  <button
+                    type="button"
+                    className="secondary full-button"
+                    disabled={resendingVerification || resendCooldownSecondsLeft > 0}
+                    onClick={handleResendVerification}
+                  >
+                    {resendingVerification
+                      ? 'Sending…'
+                      : resendCooldownSecondsLeft > 0
+                        ? `Resend available in ${resendCooldownSecondsLeft}s`
+                        : 'Resend verification email'}
+                  </button>
+                  {resendError && <p className="field-help">{resendError}</p>}
+                </>
+              )}
+            </div>
             <form className="settings-card" onSubmit={saveCategorySettings}>
               <div className="settings-title">
                 <span className="settings-symbol">
@@ -1768,6 +1870,33 @@ function App() {
               </button>
               <button className="danger" disabled={deletingAccount} onClick={handleDeleteAccount}>
                 {deletingAccount ? 'Deleting…' : 'Delete account'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showVerifyModal && (
+        <div className="modal-backdrop">
+          <div className="modal notice-modal">
+            <button
+              type="button"
+              className="modal-close"
+              aria-label="Close"
+              onClick={() => setShowVerifyModal(false)}
+            >
+              ×
+            </button>
+            <span className="notice-icon">
+              <Icon name="alert" />
+            </span>
+            <h2>Verify your email</h2>
+            <p>
+              We sent a verification link to <strong>{accountEmail}</strong>. Check your inbox (and
+              spam folder) and click the link to verify your account.
+            </p>
+            <div className="modal-actions">
+              <button className="primary" onClick={() => setShowVerifyModal(false)}>
+                OK
               </button>
             </div>
           </div>

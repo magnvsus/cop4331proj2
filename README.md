@@ -59,6 +59,7 @@ cd ..
 | `cors` | Cross-origin requests from the frontend |
 | `multer` | Parses multipart/form-data uploads (item photos) |
 | `sharp` | Resizes/compresses uploaded item photos before they're saved to disk |
+| `nodemailer` | Sends the account-verification email on registration |
 
 **`coffee/`** — the React frontend:
 | Package | Purpose |
@@ -88,7 +89,15 @@ MONGODB_URI=<your MongoDB connection string>
 MONGODB_DB_NAME=<your database name>
 JWT_SECRET=<a random secret string>
 JWT_EXPIRES_IN=24h
+
+# Account verification email (sent on registration)
+EMAIL_USER=<your Gmail address>
+EMAIL_APP_PASSWORD=<a Gmail App Password -- not your regular password>
+EMAIL_FROM=<optional; defaults to EMAIL_USER>
+API_BASE_URL=http://localhost:5000
 ```
+
+`EMAIL_APP_PASSWORD` requires 2-Step Verification to be enabled on the Gmail account, then generating an [App Password](https://myaccount.google.com/apppasswords) for it — a regular Gmail password won't authenticate over SMTP. `API_BASE_URL` is the public URL used to build the link in the verification email (e.g. `https://aecm.site` in production); the verification link itself is a backend route (`/api/auth/verify-email/:token`) that shows a plain confirmation page, not a frontend route.
 
 ## Running the app for development
 

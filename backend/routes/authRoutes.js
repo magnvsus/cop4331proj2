@@ -10,6 +10,12 @@ router.post('/register', authController.register);
 // Login Route
 router.post('/login', authController.login);
 
+// Email Verification Route (clicked directly from the verification email)
+router.get('/verify-email/:token', authController.verifyEmail);
+
+// Resend Verification Email Route
+router.post('/resend-verification', protect, authController.resendVerification);
+
 // Update Banner Route
 router.patch('/banner', protect, authController.updateBanner);
 

@@ -1,11 +1,13 @@
 process.env.JWT_SECRET = 'test-secret';
 
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const fs = require('fs/promises');
 const User = require('../models/User');
 const Item = require('../models/Item');
 const Category = require('../models/Category');
+const mailer = require('../utils/mailer');
 const authController = require('./authController');
 const { mockRequest, mockResponse } = require('../testUtils/expressMocks');
 
@@ -24,6 +26,11 @@ jest.mock('../models/Category');
 jest.mock('bcryptjs');
 jest.mock('jsonwebtoken');
 jest.mock('fs/promises');
+jest.mock('../utils/mailer');
+
+beforeEach(() => {
+  mailer.sendVerificationEmail.mockResolvedValue(undefined);
+});
 
 describe('authController.register', () => {
   it('rejects registration with a missing email or password', async () => {
@@ -59,7 +66,7 @@ describe('authController.register', () => {
     expect(res.json).toHaveBeenCalledWith({ error: 'Email is already registered' });
   });
 
-  it('hashes the password and creates a new user', async () => {
+  it('hashes the password, creates a new user with a verification token, and emails it', async () => {
     User.findOne.mockResolvedValue(null);
     bcrypt.genSalt.mockResolvedValue('salt');
     bcrypt.hash.mockResolvedValue('hashed-password');
@@ -75,10 +82,45 @@ describe('authController.register', () => {
     await authController.register(req, res);
 
     expect(bcrypt.hash).toHaveBeenCalledWith('plain-password', 'salt');
-    expect(User).toHaveBeenCalledWith({ email: 'new@example.com', password: 'hashed-password' });
+    expect(User).toHaveBeenCalledWith({
+      email: 'new@example.com',
+      password: 'hashed-password',
+      emailVerificationToken: expect.any(String),
+      emailVerificationExpires: expect.any(Number),
+    });
     expect(save).toHaveBeenCalled();
+
+    // The token handed to the mailer must be the raw value, not the hash
+    // that got stored on the user -- otherwise the link in the email could
+    // never match what's saved.
+    const [, rawToken] = mailer.sendVerificationEmail.mock.calls[0];
+    const [userArg] = User.mock.calls[0];
+    const expectedHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+    expect(userArg.emailVerificationToken).toBe(expectedHash);
+    expect(mailer.sendVerificationEmail).toHaveBeenCalledWith('new@example.com', rawToken);
+
     expect(res.status).toHaveBeenCalledWith(201);
-    expect(res.json).toHaveBeenCalledWith({ message: 'User registered successfully' });
+    expect(res.json).toHaveBeenCalledWith({
+      message: 'User registered successfully. Check your email to verify your account.',
+    });
+  });
+
+  it('still succeeds if sending the verification email fails', async () => {
+    User.findOne.mockResolvedValue(null);
+    bcrypt.genSalt.mockResolvedValue('salt');
+    bcrypt.hash.mockResolvedValue('hashed-password');
+    User.mockImplementation(function (data) {
+      Object.assign(this, data);
+      this.save = jest.fn().mockResolvedValue(undefined);
+    });
+    mailer.sendVerificationEmail.mockRejectedValue(new Error('SMTP down'));
+
+    const req = mockRequest({ body: { email: 'new@example.com', password: 'plain-password' } });
+    const res = mockResponse();
+
+    await authController.register(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
   });
 
   it('returns a 500 when something unexpected fails', async () => {
@@ -87,6 +129,162 @@ describe('authController.register', () => {
     const res = mockResponse();
 
     await authController.register(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
+});
+
+describe('authController.verifyEmail', () => {
+  it('rejects an invalid or expired token', async () => {
+    User.findOne.mockResolvedValue(null);
+    const req = mockRequest({ params: { token: 'bogus-token' } });
+    const res = mockResponse();
+
+    await authController.verifyEmail(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.type).toHaveBeenCalledWith('html');
+    expect(res.send).toHaveBeenCalledWith(expect.stringContaining('Verification failed'));
+  });
+
+  it('looks up the user by the hash of the token (never the raw token) and checks expiry', async () => {
+    User.findOne.mockResolvedValue(null);
+    const req = mockRequest({ params: { token: 'raw-token' } });
+    const res = mockResponse();
+
+    await authController.verifyEmail(req, res);
+
+    const expectedHash = crypto.createHash('sha256').update('raw-token').digest('hex');
+    expect(User.findOne).toHaveBeenCalledWith({
+      emailVerificationToken: expectedHash,
+      emailVerificationExpires: { $gt: expect.any(Number) },
+    });
+  });
+
+  it('marks the account verified and clears the token on success', async () => {
+    const save = jest.fn().mockResolvedValue(undefined);
+    const user = {
+      isVerified: false,
+      emailVerificationToken: 'hash',
+      emailVerificationExpires: Date.now() + 1000,
+      save,
+    };
+    User.findOne.mockResolvedValue(user);
+    const req = mockRequest({ params: { token: 'raw-token' } });
+    const res = mockResponse();
+
+    await authController.verifyEmail(req, res);
+
+    expect(user.isVerified).toBe(true);
+    expect(user.emailVerificationToken).toBeUndefined();
+    expect(user.emailVerificationExpires).toBeUndefined();
+    expect(save).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.type).toHaveBeenCalledWith('html');
+    expect(res.send).toHaveBeenCalledWith(expect.stringContaining('Email verified'));
+  });
+
+  it('returns a 500 page when something unexpected fails', async () => {
+    User.findOne.mockRejectedValue(new Error('db down'));
+    const req = mockRequest({ params: { token: 'raw-token' } });
+    const res = mockResponse();
+
+    await authController.verifyEmail(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.type).toHaveBeenCalledWith('html');
+  });
+});
+
+describe('authController.resendVerification', () => {
+  function mockFindByIdWithExpires(user) {
+    User.findById.mockReturnValue({ select: jest.fn().mockResolvedValue(user) });
+  }
+
+  it('returns 404 when the user does not exist', async () => {
+    mockFindByIdWithExpires(null);
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.resendVerification(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(mailer.sendVerificationEmail).not.toHaveBeenCalled();
+  });
+
+  it('rejects an already-verified account', async () => {
+    mockFindByIdWithExpires({ _id: 'u1', isVerified: true });
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.resendVerification(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Account is already verified' });
+    expect(mailer.sendVerificationEmail).not.toHaveBeenCalled();
+  });
+
+  it('enforces a 60s cooldown between sends, even calling the endpoint directly', async () => {
+    // A token issued 10 seconds ago -- still well within the 60s cooldown.
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000 - 10 * 1000);
+    mockFindByIdWithExpires({ _id: 'u1', isVerified: false, emailVerificationExpires: expires });
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.resendVerification(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ retryAfterSeconds: expect.any(Number) })
+    );
+    expect(mailer.sendVerificationEmail).not.toHaveBeenCalled();
+  });
+
+  it('issues a new token and sends it once the cooldown has passed', async () => {
+    const save = jest.fn().mockResolvedValue(undefined);
+    // A token issued 23h59m50s ago -- cooldown (60s) has elapsed.
+    const expires = new Date(Date.now() + 10 * 1000);
+    const user = {
+      _id: 'u1',
+      email: 'user@example.com',
+      isVerified: false,
+      emailVerificationExpires: expires,
+      save,
+    };
+    mockFindByIdWithExpires(user);
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.resendVerification(req, res);
+
+    expect(user.emailVerificationToken).toEqual(expect.any(String));
+    expect(save).toHaveBeenCalled();
+    expect(mailer.sendVerificationEmail).toHaveBeenCalledWith('user@example.com', expect.any(String));
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({ message: 'Verification email sent' });
+  });
+
+  it('treats a user with no prior token as eligible to send immediately', async () => {
+    const save = jest.fn().mockResolvedValue(undefined);
+    const user = { _id: 'u1', email: 'user@example.com', isVerified: false, save };
+    mockFindByIdWithExpires(user);
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.resendVerification(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('returns a 500 when sending fails', async () => {
+    const save = jest.fn().mockResolvedValue(undefined);
+    const user = { _id: 'u1', email: 'user@example.com', isVerified: false, save };
+    mockFindByIdWithExpires(user);
+    mailer.sendVerificationEmail.mockRejectedValue(new Error('SMTP down'));
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.resendVerification(req, res);
 
     expect(res.status).toHaveBeenCalledWith(500);
   });
