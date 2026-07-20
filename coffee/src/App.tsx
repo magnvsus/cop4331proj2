@@ -1,139 +1,44 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, ReactNode } from 'react'
+import {
+  addItem,
+  login,
+  register,
+  removeItem,
+  searchItems,
+  updateItem,
+  type Account,
+  type InventoryRecord,
+  type ItemWrite,
+} from './api'
 import './App.css'
-import * as api from './api'
+import './ServerStates.css'
 
-type Item = {
-  id: string
-  name: string
-  sku: string
-  category: string
-  quantity: number
-  unit: string
-  min: number
-  image?: string
-}
+type Page = 'dashboard' | 'inventory' | 'low'
+type Modal = 'add' | 'edit' | 'delete' | null
 
-// quantity/min allow '' while the form is being edited, so the number
-// inputs can be blanked out to type a fresh value instead of getting stuck
-// showing "0". Coerced back to a real number on submit; `required` stops
-// the form from actually being submitted while either is blank.
-type Draft = Omit<Item, 'id' | 'quantity' | 'min'> & { quantity: number | ''; min: number | '' }
-
-const categories = [
-  'Dairy',
-  'Coffee & Tea',
-  'Syrups',
-  'Bakery',
-  'Food',
-  'Packaging',
-  'Cleaning',
-  'Retail',
-]
-
-const blankItem = (): Omit<Item, 'id'> => ({
+const blankItem = (): ItemWrite => ({
   name: '',
   sku: '',
-  category: 'Dairy',
-  quantity: 0,
+  categoryId: '',
+  categoryName: '',
+  amount: 0,
   unit: 'units',
-  min: 5,
-  image: '',
+  threshold: 5,
+  pictureURL: '',
 })
 
-// Unions the starter categories with an account's real ones (deduped) rather
-// than replacing them, so an account with only a couple of its own categories
-// saved doesn't lose access to the rest of the starter list in the dropdown.
-export function mergeCategoryNames(starterNames: string[], fetchedNames: string[]): string[] {
-  return Array.from(new Set([...starterNames, ...fetchedNames]))
-}
-
-// Maps a server item (plus a categoryID -> name lookup, since the server only
-// knows the category by its id) into what the UI expects.
-//
-// `image` is kept as the raw pictureURL the server returns (relative for our
-// own uploads, e.g. "/uploads/xxx.jpg") rather than resolved to an absolute
-// URL here -- it gets sent straight back as pictureURL on save, and resolving
-// it eagerly would mean saving an absolute URL, which breaks the backend's
-// "is this one of our own /uploads/ files" check when it's time to delete it.
-// Resolve with api.resolveImageUrl() only at the point of rendering <img>.
-export function normalizeItem(
-  apiItem: api.ApiItem,
-  categoryNameById: Record<string, string>,
-): Item {
-  return {
-    id: apiItem._id,
-    name: apiItem.name,
-    sku: apiItem.sku ?? '',
-    category: categoryNameById[apiItem.categoryID] ?? 'Uncategorized',
-    quantity: apiItem.amount ?? 0,
-    unit: apiItem.unit ?? 'units',
-    min: apiItem.lowStockThreshold ?? 0,
-    image: apiItem.pictureURL || undefined,
-  }
-}
-
-function Icon({
-  name,
-}: {
-  name: 'grid' | 'box' | 'alert' | 'search' | 'plus' | 'edit' | 'trash' | 'logout' | 'coffee'
-}) {
-  const paths: Record<string, React.ReactNode> = {
-    grid: (
-      <>
-        <rect x="3" y="3" width="7" height="7" rx="1" />
-        <rect x="14" y="3" width="7" height="7" rx="1" />
-        <rect x="3" y="14" width="7" height="7" rx="1" />
-        <rect x="14" y="14" width="7" height="7" rx="1" />
-      </>
-    ),
-    box: (
-      <>
-        <path d="M21 8 12 3 3 8l9 5 9-5Z" />
-        <path d="m3 8 9 5 9-5v8l-9 5-9-5V8Z" />
-        <path d="M12 13v8" />
-      </>
-    ),
-    alert: (
-      <>
-        <path d="M10.3 3.7 2.5 17.2A2 2 0 0 0 4.2 20h15.6a2 2 0 0 0 1.7-2.8L13.7 3.7a2 2 0 0 0-3.4 0Z" />
-        <path d="M12 9v4" />
-        <path d="M12 17h.01" />
-      </>
-    ),
-    search: (
-      <>
-        <circle cx="11" cy="11" r="7" />
-        <path d="m20 20-4-4" />
-      </>
-    ),
-    plus: (
-      <>
-        <path d="M12 5v14M5 12h14" />
-      </>
-    ),
-    edit: (
-      <>
-        <path d="M12 20h9" />
-        <path d="m16.5 3.5 4 4L8 20l-5 1 1-5Z" />
-      </>
-    ),
-    trash: (
-      <>
-        <path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6" />
-      </>
-    ),
-    logout: (
-      <>
-        <path d="M10 17l5-5-5-5M15 12H3M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5" />
-      </>
-    ),
-    coffee: (
-      <>
-        <path d="M4 8h13v7a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V8Z" />
-        <path d="M17 10h1a3 3 0 0 1 0 6h-1M7 4c0 1 1 1 1 2M11 3c0 1 1 1 1 2" />
-      </>
-    ),
+function Icon({ name }: { name: 'grid' | 'box' | 'alert' | 'search' | 'plus' | 'edit' | 'trash' | 'logout' | 'coffee' }) {
+  const paths: Record<string, ReactNode> = {
+    grid: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
+    box: <><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="m3 8 9 5 9-5v8l-9 5-9-5V8Z"/><path d="M12 13v8"/></>,
+    alert: <><path d="M10.3 3.7 2.5 17.2A2 2 0 0 0 4.2 20h15.6a2 2 0 0 0 1.7-2.8L13.7 3.7a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></>,
+    search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
+    plus: <path d="M12 5v14M5 12h14"/>,
+    edit: <><path d="M12 20h9"/><path d="m16.5 3.5 4 4L8 20l-5 1 1-5Z"/></>,
+    trash: <><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></>,
+    logout: <><path d="M10 17l5-5-5-5M15 12H3M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5"/></>,
+    coffee: <><path d="M4 8h13v7a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V8Z"/><path d="M17 10h1a3 3 0 0 1 0 6h-1M7 4c0 1 1 1 1 2M11 3c0 1 1 1 1 2"/></>,
   }
   return (
     <svg
@@ -150,1100 +55,173 @@ function Icon({
   )
 }
 
-function Login({ onLogin }: { onLogin: (email: string, password: string) => Promise<void> }) {
-  const [showPassword, setShowPassword] = useState(false)
+function Auth({ onAuthenticated }: { onAuthenticated: (account: Account) => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [submitting, setSubmitting] = useState(false)
+  const [notice, setNotice] = useState('')
 
-  const handleSubmit = async (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
+    setBusy(true)
     setError('')
-    setSubmitting(true)
+    setNotice('')
     try {
-      await onLogin(email, password)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed')
+      if (mode === 'register') {
+        await register(email.trim(), password)
+        setMode('login')
+        setNotice('Account created. You can sign in now.')
+      } else {
+        onAuthenticated(await login(email.trim(), password))
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Something went wrong.')
     } finally {
-      setSubmitting(false)
+      setBusy(false)
     }
   }
 
-  return (
-    <main className="login-page">
-      <section className="login-art">
-        <div className="brand brand-light">
-          <span className="brand-mark">
-            <Icon name="coffee" />
-          </span>
-          <span>Inventory Hub</span>
-        </div>
-        <div className="art-copy">
-          <div className="steam">⌇</div>
-          <div className="big-cup">
-            <Icon name="coffee" />
-          </div>
-          <h1>Everything in its place.</h1>
-          <p>Simple inventory management for busy small businesses.</p>
-        </div>
-        <div className="beans">●　·　●</div>
-      </section>
-      <section className="login-panel">
-        <div className="login-card">
-          <div className="mobile-brand brand">
-            <span className="brand-mark">
-              <Icon name="coffee" />
-            </span>
-            <span>Inventory Hub</span>
-          </div>
-          <span className="eyebrow">WELCOME BACK</span>
-          <h2>Sign in to your account</h2>
-          <p className="muted">Keep your shelves stocked and your day running smoothly.</p>
-          <form onSubmit={handleSubmit}>
-            <label>
-              Email address
-              <input
-                type="email"
-                placeholder="you@coffeehour.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </label>
-            <label>
-              Password
-              <div className="password-wrap">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? 'Hide' : 'Show'}
-                </button>
-              </div>
-            </label>
-            <div className="form-row">
-              <label className="check">
-                <input type="checkbox" /> Remember me
-              </label>
-              <button type="button" className="link-button">
-                Forgot password?
-              </button>
-            </div>
-            {error && (
-              <p className="field-help" style={{ color: '#a33b31', marginBottom: 14 }}>
-                {error}
-              </p>
-            )}
-            <button className="primary login-button" type="submit" disabled={submitting}>
-              {submitting ? (
-                'Signing in…'
-              ) : (
-                <>
-                  Sign in <span>→</span>
-                </>
-              )}
-            </button>
-          </form>
-          <p className="demo-note">
-            <span>●</span> Sign in with your Inventory Hub account
-          </p>
-        </div>
-        <p className="copyright">© 2026 Inventory Hub · Coffee Hour Demo</p>
-      </section>
-    </main>
-  )
+  return <main className="login-page">
+    <section className="login-art">
+      <div className="brand brand-light"><span className="brand-mark"><Icon name="coffee" /></span><span>Inventory Hub</span></div>
+      <div className="art-copy"><div className="steam">⌇</div><div className="big-cup"><Icon name="coffee" /></div><h1>Everything in its place.</h1><p>Simple inventory management for busy small businesses.</p></div>
+      <div className="beans">●　·　●</div>
+    </section>
+    <section className="login-panel">
+      <div className="login-card">
+        <div className="mobile-brand brand"><span className="brand-mark"><Icon name="coffee" /></span><span>Inventory Hub</span></div>
+        <span className="eyebrow">{mode === 'login' ? 'WELCOME BACK' : 'GET STARTED'}</span>
+        <h2>{mode === 'login' ? 'Sign in to your account' : 'Create an account'}</h2>
+        <p className="muted">{mode === 'login' ? 'Access the inventory connected to your account.' : 'Register with the inventory service.'}</p>
+        <form onSubmit={submit}>
+          <label>Email address<input type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} required /></label>
+          <label>Password<div className="password-wrap"><input type={showPassword ? 'text' : 'password'} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={event => setPassword(event.target.value)} required /><button type="button" className="text-button" onClick={() => setShowPassword(!showPassword)}>{showPassword ? 'Hide' : 'Show'}</button></div></label>
+          {error && <p className="api-message error" role="alert">{error}</p>}
+          {notice && <p className="api-message success" role="status">{notice}</p>}
+          <button className="primary login-button" type="submit" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'} <span>→</span></button>
+          <button type="button" className="auth-switch" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); setNotice('') }}>{mode === 'login' ? 'Need an account? Register' : 'Already registered? Sign in'}</button>
+        </form>
+      </div>
+    </section>
+  </main>
 }
 
-type Page = 'dashboard' | 'inventory' | 'low' | 'settings'
-type Company = { name: string; type: string; accent: string; manager: string }
-
 function App() {
-  // ---------------- State ----------------
-  const [loggedIn, setLoggedIn] = useState(false)
+  const [account, setAccount] = useState<Account | null>(null)
+  const [items, setItems] = useState<InventoryRecord[]>([])
   const [page, setPage] = useState<Page>('dashboard')
-  const [items, setItems] = useState<Item[]>([])
-  const [company, setCompany] = useState<Company>({
-    name: 'Coffee Hour',
-    type: 'Coffee shop',
-    accent: '#a9642e',
-    manager: 'Alex Morgan',
-  })
-  const [businessCategories, setBusinessCategories] = useState<string[]>(categories)
-  const [categoryIdByName, setCategoryIdByName] = useState<Record<string, string>>({})
-  const [categoryInput, setCategoryInput] = useState(categories.join(', '))
-  const [saved, setSaved] = useState(false)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('All categories')
-  const [modal, setModal] = useState<'add' | 'edit' | 'delete' | null>(null)
-  const [draft, setDraft] = useState<Draft>(blankItem())
+  const [modal, setModal] = useState<Modal>(null)
+  const [draft, setDraft] = useState<ItemWrite>(blankItem())
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  // Raw pictureURL-style value from the server, resolved to a displayable
-  // URL only at render time -- same reasoning as Item.image (see
-  // normalizeItem above): keeps whatever we send back to the server on
-  // change as the real relative path, not an absolute URL.
-  const [bannerImage, setBannerImage] = useState<string | undefined>(undefined)
-  const [uploadingBanner, setUploadingBanner] = useState(false)
-  const [showBannerModal, setShowBannerModal] = useState(false)
-  // Whether the heading/eyebrow/subtitle text renders over the banner --
-  // just a display preference, not persisted anywhere, so it resets to
-  // shown on reload.
-  const [showHeaderText, setShowHeaderText] = useState(true)
-  // Whichever of white/black actually has better contrast against the
-  // current banner image, computed below. Defaults to white to match the
-  // page's look with no banner set.
-  const [bannerTextColor, setBannerTextColor] = useState<'white' | 'black'>('white')
-  // A photo the user just picked but hasn't saved yet -- held locally and
-  // only actually uploaded on submit, so cancelling the modal never leaves
-  // an orphaned file on the server.
-  const [pendingPhoto, setPendingPhoto] = useState<File | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
-  // Local preview of pendingPhoto. Revoked whenever it changes/unmounts so
-  // blob URLs don't pile up.
-  const pendingPhotoPreview = useMemo(
-    () => (pendingPhoto ? URL.createObjectURL(pendingPhoto) : null),
-    [pendingPhoto],
-  )
-  useEffect(() => {
-    return () => {
-      if (pendingPhotoPreview) URL.revokeObjectURL(pendingPhotoPreview)
-    }
-  }, [pendingPhotoPreview])
-
-  // Picks whichever of white/black text has better contrast against the
-  // banner, by drawing it into an offscreen canvas and averaging pixel
-  // brightness. crossOrigin is required to read pixels back out of the
-  // canvas at all when the image is served from a different origin (e.g.
-  // the Android app's https://localhost origin loading the image from the
-  // real API domain) -- if the server hasn't sent the right CORS header for
-  // that, reading the canvas throws a SecurityError, which is caught below
-  // and just falls back to white rather than breaking the page.
-  useEffect(() => {
-    const resolvedUrl = api.resolveImageUrl(bannerImage)
-    if (!resolvedUrl) {
-      setBannerTextColor('white')
-      return
-    }
-    let cancelled = false
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => {
-      if (cancelled) return
-      try {
-        const size = 32
-        const canvas = document.createElement('canvas')
-        canvas.width = size
-        canvas.height = size
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return
-        ctx.drawImage(img, 0, 0, size, size)
-        const { data } = ctx.getImageData(0, 0, size, size)
-        let total = 0
-        for (let i = 0; i < data.length; i += 4) {
-          total += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
-        }
-        const averageBrightness = total / (data.length / 4)
-        setBannerTextColor(averageBrightness > 140 ? 'black' : 'white')
-      } catch {
-        setBannerTextColor('white')
-      }
-    }
-    img.onerror = () => setBannerTextColor('white')
-    img.src = resolvedUrl
-    return () => {
-      cancelled = true
-    }
-  }, [bannerImage])
-
-  // ---------------- Data loading ----------------
-  // Load categories first, then items -- items only store a categoryID, so we
-  // need the id->name map in hand before normalizeItem can show a category name.
-  useEffect(() => {
-    if (!loggedIn) return
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      setLoadError('')
-      try {
-        const fetchedCategories = await api.fetchCategories()
-        if (cancelled) return
-        const idByName: Record<string, string> = {}
-        const nameById: Record<string, string> = {}
-        fetchedCategories.forEach((c) => {
-          idByName[c.name] = c._id
-          nameById[c._id] = c.name
-        })
-        setCategoryIdByName(idByName)
-        const names = mergeCategoryNames(
-          categories,
-          fetchedCategories.map((c) => c.name),
-        )
-        setBusinessCategories(names)
-        setCategoryInput(names.join(', '))
-
-        const fetchedItems = await api.fetchItems()
-        if (cancelled) return
-        setItems(fetchedItems.map((it) => normalizeItem(it, nameById)))
-      } catch (err) {
-        if (!cancelled)
-          setLoadError(err instanceof Error ? err.message : 'Failed to load inventory data')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [loggedIn])
-
-  // ---------------- Derived values ----------------
-  const lowItems = items.filter((item) => item.quantity <= item.min)
-  const visibleItems = useMemo(
-    () =>
-      items.filter(
-        (item) =>
-          (page !== 'low' || item.quantity <= item.min) &&
-          (category === 'All categories' || item.category === category) &&
-          `${item.name} ${item.sku}`.toLowerCase().includes(query.toLowerCase()),
-      ),
-    [items, page, category, query],
-  )
-  const initials = company.manager
-    .split(' ')
-    .map((word) => word[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase()
-
-  // ---------------- Handlers ----------------
-  const handleLogin = async (email: string, password: string) => {
-    const { token, user } = await api.login(email, password)
-    localStorage.setItem('token', token)
-    // Your User model doesn't store a display name, so this derives one from
-    // the email address (e.g. "alex.morgan@coffeehour.com" -> "Alex Morgan").
-    const displayName = user.email
-      .split('@')[0]
-      .replace(/[._-]+/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase())
-    setCompany((current) => ({ ...current, manager: displayName || current.manager }))
-    setBannerImage(user.bannerImage || undefined)
-    setLoggedIn(true)
-  }
-
-  const handleLogout = () => {
-    localStorage.removeItem('token')
-    setLoggedIn(false)
-    setItems([])
-    setPage('dashboard')
-    setBannerImage(undefined)
-  }
-
-  // Uploads immediately (unlike item photos, there's no surrounding form/
-  // submit step here -- picking a new banner is the entire action) and
-  // saves it to the account right away.
-  const changeBanner = async (file?: File) => {
-    if (!file) return
-    setLoadError('')
-    setUploadingBanner(true)
+  const loadItems = async (activeAccount: Account, search = '') => {
+    setLoading(true)
+    setError('')
     try {
-      const pictureURL = await api.uploadItemImage(file)
-      const user = await api.updateBanner(pictureURL)
-      setBannerImage(user.bannerImage || undefined)
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Could not update banner')
+      setItems(await searchItems(activeAccount.id, search))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to load inventory.')
     } finally {
-      setUploadingBanner(false)
+      setLoading(false)
     }
   }
 
-  const removeBanner = async () => {
-    setLoadError('')
-    setUploadingBanner(true)
-    try {
-      const user = await api.updateBanner('')
-      setBannerImage(user.bannerImage || undefined)
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Could not remove banner')
-    } finally {
-      setUploadingBanner(false)
-    }
-  }
+  useEffect(() => {
+    if (!account) return
+    const timeout = window.setTimeout(() => void loadItems(account, query.trim()), 250)
+    return () => window.clearTimeout(timeout)
+  }, [account, query])
+
+  const categories = useMemo(() => [...new Set(items.map(item => item.categoryName).filter(Boolean))], [items])
+  const lowItems = items.filter(item => item.amount <= item.threshold)
+  const visibleItems = items.filter(item =>
+    (page !== 'low' || item.amount <= item.threshold) &&
+    (category === 'All categories' || item.categoryName === category)
+  )
+  const displayName = account?.firstName || account?.email.split('@')[0] || 'there'
+  const initials = displayName.slice(0, 2).toUpperCase()
 
   const openAdd = () => {
-    setDraft(blankItem())
+    setDraft({ ...blankItem(), categoryName: category === 'All categories' ? '' : category })
     setSelectedId(null)
-    setPendingPhoto(null)
+    setError('')
     setModal('add')
   }
-  const openEdit = (item: Item) => {
-    setDraft({ ...item })
+
+  const openEdit = (item: InventoryRecord) => {
+    const { accountId: _accountId, id: _id, ...write } = item
+    setDraft(write)
     setSelectedId(item.id)
-    setPendingPhoto(null)
+    setError('')
     setModal('edit')
   }
-  const closeModal = () => {
-    setModal(null)
-    setPendingPhoto(null)
-  }
 
-  // Creates the category on the backend the first time it's used, so the
-  // user never has to visit Settings before adding their first item.
-  const ensureCategoryId = async (name: string): Promise<string> => {
-    if (categoryIdByName[name]) return categoryIdByName[name]
-    const created = await api.addCategory(name)
-    setCategoryIdByName((current) => ({ ...current, [name]: created._id }))
-    setBusinessCategories((current) => (current.includes(name) ? current : [...current, name]))
-    return created._id
-  }
-
-  const saveItem = async (event: FormEvent) => {
+  const save = async (event: FormEvent) => {
     event.preventDefault()
-    setLoadError('')
-    setSubmitting(true)
+    if (!account) return
+    setSaving(true)
+    setError('')
     try {
-      const categoryID = await ensureCategoryId(draft.category)
-      // The photo is only actually uploaded here, on submit -- not when it
-      // was picked -- so cancelling the modal never leaves an orphaned file
-      // on the server. Sent as '' rather than omitted when there's no photo,
-      // so removing an existing item's photo actually clears it server-side
-      // instead of the field just being silently left unchanged.
-      const pictureURL = pendingPhoto
-        ? await api.uploadItemImage(pendingPhoto)
-        : (draft.image ?? '')
-      const payload: api.NewItemPayload = {
-        name: draft.name,
-        sku: draft.sku || undefined,
-        unit: draft.unit || undefined,
-        // required on both inputs already stops the form submitting while
-        // blank -- these fallbacks just satisfy the type/are a last resort.
-        amount: draft.quantity === '' ? 0 : draft.quantity,
-        lowStockThreshold: draft.min === '' ? 0 : draft.min,
-        categoryID,
-        pictureURL,
-      }
-
-      if (modal === 'add') {
-        const created = await api.addItem(payload)
-        setItems((current) => [
-          ...current,
-          {
-            id: created._id,
-            name: created.name,
-            sku: created.sku ?? draft.sku,
-            category: draft.category,
-            quantity: created.amount,
-            unit: created.unit ?? draft.unit,
-            min: created.lowStockThreshold ?? (draft.min === '' ? 0 : draft.min),
-            image: created.pictureURL || undefined,
-          },
-        ])
-      } else if (selectedId) {
-        const updated = await api.updateItem(selectedId, payload)
-        setItems((current) =>
-          current.map((item) =>
-            item.id === selectedId
-              ? {
-                  id: item.id,
-                  name: updated.name,
-                  sku: updated.sku ?? draft.sku,
-                  category: draft.category,
-                  quantity: updated.amount,
-                  unit: updated.unit ?? draft.unit,
-                  min: updated.lowStockThreshold ?? (draft.min === '' ? 0 : draft.min),
-                  image: updated.pictureURL || undefined,
-                }
-              : item,
-          ),
-        )
-      }
-      setPendingPhoto(null)
+      const payload = { ...draft, categoryName: draft.categoryName.trim() || draft.categoryId.trim() }
+      if (modal === 'add') await addItem(account.id, payload)
+      else if (selectedId) await updateItem(account.id, selectedId, payload)
+      await loadItems(account, query.trim())
       setModal(null)
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Could not save item')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to save the item.')
     } finally {
-      setSubmitting(false)
+      setSaving(false)
     }
   }
 
   const confirmDelete = async () => {
-    if (!selectedId) return
-    setLoadError('')
+    if (!account || !selectedId) return
+    setSaving(true)
+    setError('')
     try {
-      await api.deleteItem(selectedId)
-      setItems((current) => current.filter((item) => item.id !== selectedId))
+      await removeItem(account.id, selectedId)
+      await loadItems(account, query.trim())
       setModal(null)
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Could not delete item')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to remove the item.')
+    } finally {
+      setSaving(false)
     }
   }
 
-  const saveCategorySettings = async (event: FormEvent) => {
-    event.preventDefault()
-    setLoadError('')
-    const values = categoryInput
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean)
-    const toAdd = values.filter((v) => !businessCategories.includes(v))
-    const toRemove = businessCategories.filter((v) => !values.includes(v))
-    try {
-      const newIds: Record<string, string> = {}
-      for (const name of toAdd) {
-        const created = await api.addCategory(name)
-        newIds[name] = created._id
-      }
-      for (const name of toRemove) {
-        const id = categoryIdByName[name]
-        if (id) await api.deleteCategory(id)
-      }
-      setCategoryIdByName((current) => ({ ...current, ...newIds }))
-      setBusinessCategories(values)
-      if (values.length && !values.includes(draft.category))
-        setDraft((current) => ({ ...current, category: values[0] }))
-      setSaved(true)
-      window.setTimeout(() => setSaved(false), 2200)
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Could not update categories')
-    }
-  }
+  if (!account) return <Auth onAuthenticated={setAccount} />
 
-  // Just stages the file locally -- actually uploading happens in saveItem,
-  // on submit, so picking a photo and then cancelling never leaves an
-  // orphaned file on the server.
-  const choosePhoto = (file?: File) => {
-    if (!file) return
-    setPendingPhoto(file)
-  }
-
-  if (!loggedIn) return <Login onLogin={handleLogin} />
-
-  // ---------------- Render ----------------
-  const inventoryPanel = (
-    <section className="inventory-card">
-      <div className="section-heading">
-        <div>
-          <h2>
-            {page === 'low'
-              ? 'Low-stock items'
-              : page === 'dashboard'
-                ? 'Inventory overview'
-                : 'All inventory'}
-          </h2>
-          <p>
-            {page === 'low'
-              ? 'Items at or below their reorder level.'
-              : 'Search, update, and organize all company stock.'}
-          </p>
-        </div>
-        <div className="tools">
-          <label className="search">
-            <Icon name="search" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search items or SKU..."
-            />
-          </label>
-          <select value={category} onChange={(event) => setCategory(event.target.value)}>
-            <option>All categories</option>
-            {businessCategories.map((option) => (
-              <option key={option}>{option}</option>
-            ))}
-          </select>
-          <button className="primary" onClick={openAdd}>
-            <Icon name="plus" /> Add item
-          </button>
-        </div>
-      </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>ITEM</th>
-              <th>CATEGORY</th>
-              <th>QUANTITY</th>
-              <th>REORDER AT</th>
-              <th>STATUS</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {visibleItems.map((item) => {
-              const low = item.quantity <= item.min
-              return (
-                <tr key={item.id}>
-                  <td>
-                    <div className="item-name">
-                      {item.image ? (
-                        <img
-                          className="product-photo"
-                          src={api.resolveImageUrl(item.image)}
-                          alt=""
-                        />
-                      ) : (
-                        <span
-                          className={`product-icon ${item.category.toLowerCase().replaceAll(' ', '-')}`}
-                        >
-                          {item.name.charAt(0)}
-                        </span>
-                      )}
-                      <div>
-                        <strong>{item.name}</strong>
-                        <small>{item.sku}</small>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <span className="category-pill">{item.category}</span>
-                  </td>
-                  <td>
-                    <strong>{item.quantity}</strong> <span className="unit">{item.unit}</span>
-                  </td>
-                  <td>
-                    {item.min} {item.unit}
-                  </td>
-                  <td>
-                    <span className={`status ${low ? 'low' : 'good'}`}>
-                      <i />
-                      {low ? 'Low stock' : 'In stock'}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="row-actions">
-                      <button aria-label={`Edit ${item.name}`} onClick={() => openEdit(item)}>
-                        <Icon name="edit" />
-                      </button>
-                      <button
-                        aria-label={`Delete ${item.name}`}
-                        onClick={() => {
-                          setSelectedId(item.id)
-                          setModal('delete')
-                        }}
-                      >
-                        <Icon name="trash" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-        {visibleItems.length === 0 && (
-          <div className="empty">
-            <Icon name="search" />
-            <h3>No items found</h3>
-            <p>{loading ? 'Loading inventory…' : 'Try another search or category.'}</p>
-          </div>
-        )}
-      </div>
-      <div className="table-footer">
-        Showing {visibleItems.length} of {items.length} items
-      </div>
-    </section>
-  )
-
-  return (
-    <div
-      className="app-shell"
-      style={{ '--company-accent': company.accent } as React.CSSProperties}
-    >
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark">
-            <Icon name="box" />
-          </span>
-          <span>
-            Inventory Hub<small>{company.name.toUpperCase()}</small>
-          </span>
-        </div>
-        <nav>
-          <button
-            className={page === 'dashboard' ? 'active' : ''}
-            onClick={() => setPage('dashboard')}
-          >
-            <Icon name="grid" /> Dashboard
-          </button>
-          <button
-            className={page === 'inventory' ? 'active' : ''}
-            onClick={() => setPage('inventory')}
-          >
-            <Icon name="box" /> Inventory
-          </button>
-          <button className={page === 'low' ? 'active' : ''} onClick={() => setPage('low')}>
-            <Icon name="alert" /> Low stock <b>{lowItems.length}</b>
-          </button>
-          <button
-            className={page === 'settings' ? 'active' : ''}
-            onClick={() => setPage('settings')}
-          >
-            <Icon name="edit" /> Customize
-          </button>
-        </nav>
-        <div className="sidebar-bottom">
-          <div className="user-avatar">{initials}</div>
-          <div>
-            <strong>{company.manager}</strong>
-            <small>{company.type}</small>
-          </div>
-          <button aria-label="Sign out" onClick={handleLogout}>
-            <Icon name="logout" />
-          </button>
-        </div>
-      </aside>
-      <main className="dashboard">
-        <div
-          className={bannerImage ? 'page-banner has-image' : 'page-banner'}
-          style={
-            bannerImage
-              ? ({
-                  '--banner-text-color': bannerTextColor === 'black' ? '#1a1310' : '#fff',
-                } as React.CSSProperties)
-              : undefined
-          }
-        >
-          {bannerImage && (
-            <img className="page-banner-image" src={api.resolveImageUrl(bannerImage)} alt="" />
-          )}
-          <header>
-            {showHeaderText && (
-              <div>
-                <span className="eyebrow">{company.name.toUpperCase()} · INVENTORY HUB</span>
-                <h1>
-                  {page === 'dashboard'
-                    ? `Good morning, ${company.manager.split(' ')[0]}.`
-                    : page === 'inventory'
-                      ? 'Inventory'
-                      : page === 'low'
-                        ? 'Low-stock alerts'
-                        : 'Customize your workspace'}
-                </h1>
-                <p>
-                  {page === 'settings'
-                    ? 'Adapt Inventory Hub to match any business or brand.'
-                    : `Manage inventory for your ${company.type.toLowerCase()}.`}
-                </p>
-              </div>
-            )}
-            {page !== 'settings' && (
-              <button
-                type="button"
-                className="banner-button"
-                onClick={() => setShowBannerModal(true)}
-              >
-                <Icon name="edit" /> Customize
-              </button>
-            )}
-          </header>
-        </div>
-        {loadError && (
-          <div className="alert-banner">
-            <span>
-              <Icon name="alert" />
-            </span>
-            <div>
-              <strong>Something went wrong</strong>
-              <p>{loadError}</p>
-            </div>
-            <button onClick={() => setLoadError('')}>Dismiss</button>
-          </div>
-        )}
-        {page === 'dashboard' && (
-          <>
-            <div className="alert-banner">
-              <span>
-                <Icon name="alert" />
-              </span>
-              <div>
-                <strong>{lowItems.length} items need your attention</strong>
-                <p>Stock is at or below the reorder level.</p>
-              </div>
-              <button onClick={() => setPage('low')}>View low stock →</button>
-            </div>
-            <section className="stats">
-              <article>
-                <span className="stat-icon brown">
-                  <Icon name="box" />
-                </span>
-                <div>
-                  <p>Total items</p>
-                  <strong>{items.length}</strong>
-                  <small>
-                    Across {new Set(items.map((item) => item.category)).size} categories
-                  </small>
-                </div>
-              </article>
-              <article>
-                <span className="stat-icon amber">
-                  <Icon name="alert" />
-                </span>
-                <div>
-                  <p>Low stock</p>
-                  <strong>{lowItems.length}</strong>
-                  <small>Needs attention</small>
-                </div>
-              </article>
-              <article>
-                <span className="stat-icon green">
-                  <Icon name="grid" />
-                </span>
-                <div>
-                  <p>Units in stock</p>
-                  <strong>{items.reduce((total, item) => total + item.quantity, 0)}</strong>
-                  <small>Current total</small>
-                </div>
-              </article>
-            </section>
-          </>
-        )}
-        {page !== 'settings' ? (
-          inventoryPanel
-        ) : (
-          <section className="settings-grid">
-            <form className="settings-card" onSubmit={saveCategorySettings}>
-              <div className="settings-title">
-                <span className="settings-symbol">
-                  <Icon name="edit" />
-                </span>
-                <div>
-                  <h2>Company details</h2>
-                  <p>These details appear throughout the dashboard.</p>
-                </div>
-              </div>
-              <label>
-                Company name
-                <input
-                  value={company.name}
-                  onChange={(event) => setCompany({ ...company, name: event.target.value })}
-                  required
-                />
-              </label>
-              <label>
-                Business type
-                <input
-                  value={company.type}
-                  onChange={(event) => setCompany({ ...company, type: event.target.value })}
-                  placeholder="Retail store, salon, clinic..."
-                  required
-                />
-              </label>
-              <label>
-                Manager name
-                <input
-                  value={company.manager}
-                  onChange={(event) => setCompany({ ...company, manager: event.target.value })}
-                  required
-                />
-              </label>
-              <label>
-                Inventory categories
-                <input
-                  value={categoryInput}
-                  onChange={(event) => setCategoryInput(event.target.value)}
-                  placeholder="Supplies, Products, Equipment"
-                  required
-                />
-                <small className="field-help">Separate categories with commas.</small>
-              </label>
-              <div className="settings-actions">
-                <span className={saved ? 'save-message show' : 'save-message'}>
-                  ✓ Changes saved
-                </span>
-                <button className="primary" type="submit">
-                  Save customization
-                </button>
-              </div>
-            </form>
-            <div className="settings-card">
-              <div className="settings-title">
-                <span className="settings-symbol">
-                  <Icon name="grid" />
-                </span>
-                <div>
-                  <h2>Brand color</h2>
-                  <p>Choose an accent color for buttons and highlights.</p>
-                </div>
-              </div>
-              <div className="color-row">
-                <input
-                  aria-label="Brand color"
-                  type="color"
-                  value={company.accent}
-                  onChange={(event) => setCompany({ ...company, accent: event.target.value })}
-                />
-                <div>
-                  <strong>{company.accent.toUpperCase()}</strong>
-                  <small>Custom brand accent</small>
-                </div>
-              </div>
-              <div className="preview-brand">
-                <span className="brand-mark">
-                  <Icon name="box" />
-                </span>
-                <div>
-                  <strong>Inventory Hub</strong>
-                  <small>{company.name}</small>
-                </div>
-              </div>
-              <button
-                className="secondary full-button"
-                onClick={() => {
-                  setCompany({
-                    name: 'Coffee Hour',
-                    type: 'Coffee shop',
-                    accent: '#a9642e',
-                    manager: 'Alex Morgan',
-                  })
-                  setCategoryInput(businessCategories.join(', '))
-                }}
-              >
-                Restore demo branding
-              </button>
-            </div>
-          </section>
-        )}
-      </main>
-      {(modal === 'add' || modal === 'edit') && (
-        <div className="modal-backdrop" onMouseDown={closeModal}>
-          <form
-            className="modal"
-            onSubmit={saveItem}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="modal-head">
-              <div>
-                <span className="eyebrow">INVENTORY ITEM</span>
-                <h2>{modal === 'add' ? 'Add a new item' : 'Edit item'}</h2>
-              </div>
-              <button type="button" onClick={closeModal}>
-                ×
-              </button>
-            </div>
-            <div className="photo-field">
-              <div className="photo-preview">
-                {pendingPhotoPreview || draft.image ? (
-                  <img
-                    src={pendingPhotoPreview ?? api.resolveImageUrl(draft.image)}
-                    alt="Item preview"
-                  />
-                ) : (
-                  <>
-                    <Icon name="box" />
-                    <span>No photo</span>
-                  </>
-                )}
-              </div>
-              <div>
-                <strong>Item photo</strong>
-                <p>Upload an image or take a photo on your phone.</p>
-                <label className="photo-button" aria-disabled={submitting}>
-                  <span className="desktop-only">Choose photo</span>
-                  <span className="mobile-only">Choose or take photo</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    disabled={submitting}
-                    onChange={(event) => choosePhoto(event.target.files?.[0])}
-                  />
-                </label>
-                {(pendingPhotoPreview || draft.image) && (
-                  <button
-                    type="button"
-                    className="remove-photo"
-                    onClick={() => {
-                      setPendingPhoto(null)
-                      setDraft({ ...draft, image: '' })
-                    }}
-                  >
-                    Remove photo
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="form-grid">
-              <label className="wide">
-                Item name
-                <input
-                  value={draft.name}
-                  onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                  required
-                />
-              </label>
-              <label>
-                SKU
-                <input
-                  value={draft.sku}
-                  onChange={(event) => setDraft({ ...draft, sku: event.target.value })}
-                  required
-                />
-              </label>
-              <label>
-                Category
-                <select
-                  value={draft.category}
-                  onChange={(event) => setDraft({ ...draft, category: event.target.value })}
-                >
-                  {businessCategories.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Quantity
-                <input
-                  type="number"
-                  min="0"
-                  value={draft.quantity}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      quantity: event.target.value === '' ? '' : +event.target.value,
-                    })
-                  }
-                  required
-                />
-              </label>
-              <label>
-                Unit
-                <input
-                  value={draft.unit}
-                  onChange={(event) => setDraft({ ...draft, unit: event.target.value })}
-                  required
-                />
-              </label>
-              <label className="wide">
-                Low-stock alert level
-                <input
-                  type="number"
-                  min="0"
-                  value={draft.min}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      min: event.target.value === '' ? '' : +event.target.value,
-                    })
-                  }
-                  required
-                />
-              </label>
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="secondary" onClick={closeModal}>
-                Cancel
-              </button>
-              <button className="primary" type="submit" disabled={submitting}>
-                {submitting ? 'Saving…' : modal === 'add' ? 'Add item' : 'Save changes'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-      {modal === 'delete' && (
-        <div className="modal-backdrop">
-          <div className="modal delete-modal">
-            <span className="delete-icon">
-              <Icon name="trash" />
-            </span>
-            <h2>Delete this item?</h2>
-            <p>
-              This will remove <strong>{items.find((item) => item.id === selectedId)?.name}</strong>{' '}
-              from your inventory.
-            </p>
-            <div className="modal-actions">
-              <button className="secondary" onClick={() => setModal(null)}>
-                Cancel
-              </button>
-              <button className="danger" onClick={confirmDelete}>
-                Delete item
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showBannerModal && (
-        <div className="modal-backdrop" onMouseDown={() => setShowBannerModal(false)}>
-          <div className="modal" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-head">
-              <div>
-                <span className="eyebrow">PAGE BANNER</span>
-                <h2>Customize banner</h2>
-              </div>
-              <button type="button" onClick={() => setShowBannerModal(false)}>
-                ×
-              </button>
-            </div>
-            <div className="photo-field">
-              <div className="photo-preview">
-                {bannerImage ? (
-                  <img src={api.resolveImageUrl(bannerImage)} alt="Banner preview" />
-                ) : (
-                  <>
-                    <Icon name="box" />
-                    <span>No banner</span>
-                  </>
-                )}
-              </div>
-              <div>
-                <strong>Banner image</strong>
-                <p>Shown behind the page heading.</p>
-                <label className="photo-button" aria-disabled={uploadingBanner}>
-                  {uploadingBanner ? 'Uploading…' : 'Choose photo'}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    disabled={uploadingBanner}
-                    onChange={(event) => changeBanner(event.target.files?.[0])}
-                  />
-                </label>
-                {bannerImage && (
-                  <button
-                    type="button"
-                    className="remove-photo"
-                    disabled={uploadingBanner}
-                    onClick={removeBanner}
-                  >
-                    Remove banner
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="settings-toggle-row">
-              <div>
-                <strong>Header text</strong>
-                <p>Show the page heading and subtitle over the banner.</p>
-              </div>
-              <button
-                type="button"
-                className={showHeaderText ? 'toggle-switch on' : 'toggle-switch'}
-                role="switch"
-                aria-checked={showHeaderText}
-                aria-label="Toggle header text"
-                onClick={() => setShowHeaderText((current) => !current)}
-              >
-                <span />
-              </button>
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="primary" onClick={() => setShowBannerModal(false)}>
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  return <div className="app-shell">
+    <aside className="sidebar">
+      <div className="brand sidebar-brand"><span className="brand-mark"><Icon name="coffee" /></span><span>Inventory Hub<small>LIVE INVENTORY</small></span></div>
+      <nav>
+        <button className={page === 'dashboard' ? 'active' : ''} onClick={() => setPage('dashboard')}><Icon name="grid" /> Dashboard</button>
+        <button className={page === 'inventory' ? 'active' : ''} onClick={() => setPage('inventory')}><Icon name="box" /> Inventory</button>
+        <button className={page === 'low' ? 'active' : ''} onClick={() => setPage('low')}><Icon name="alert" /> Low stock <b>{lowItems.length}</b></button>
+      </nav>
+      <div className="sidebar-bottom profile-area"><span className="user-avatar">{initials}</span><span className="profile-copy"><strong>{displayName}</strong><small>{account.email}</small></span><button aria-label="Sign out" onClick={() => { setAccount(null); setItems([]) }}><Icon name="logout" /></button></div>
+    </aside>
+    <main className="dashboard">
+      <header><div><span className="eyebrow">INVENTORY HUB</span><h1>{page === 'dashboard' ? `Good morning, ${displayName}.` : page === 'low' ? 'Low-stock alerts' : 'Inventory'}</h1><p>Your inventory below is loaded directly from the server.</p></div><button className="primary" onClick={openAdd}><Icon name="plus" /> Add item</button></header>
+      {error && !modal && <div className="api-banner" role="alert">{error}<button onClick={() => void loadItems(account, query.trim())}>Try again</button></div>}
+      {page === 'dashboard' && <><section className="stats"><article><span className="stat-icon brown"><Icon name="box" /></span><div><p>Total items</p><strong>{items.length}</strong><small>Across {categories.length} categories</small></div></article><article><span className="stat-icon amber"><Icon name="alert" /></span><div><p>Low stock</p><strong>{lowItems.length}</strong><small>Needs attention</small></div></article><article><span className="stat-icon green"><Icon name="grid" /></span><div><p>Units in stock</p><strong>{items.reduce((total, item) => total + item.amount, 0)}</strong><small>Current total</small></div></article></section></>}
+      <section className="inventory-card">
+        <div className="section-heading"><div><h2>{page === 'low' ? 'Low-stock items' : 'Inventory'}</h2><p>{loading ? 'Loading inventory…' : 'Search and manage the items saved to your account.'}</p></div><div className="tools"><label className="search"><Icon name="search" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search items..." /></label><select value={category} onChange={event => setCategory(event.target.value)}><option>All categories</option>{categories.map(name => <option key={name}>{name}</option>)}</select></div></div>
+        <div className="table-wrap"><table><thead><tr><th>ITEM</th><th>CATEGORY</th><th>QUANTITY</th><th>REORDER AT</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>{visibleItems.map(item => { const low = item.amount <= item.threshold; return <tr key={item.id}><td><div className="item-name">{item.pictureURL ? <img className="product-photo" src={item.pictureURL} alt="" /> : <span className="product-icon">{item.name.charAt(0)}</span>}<div><strong>{item.name}</strong><small>{item.sku}</small></div></div></td><td><span className="category-pill">{item.categoryName}</span></td><td><strong>{item.amount}</strong> <span className="unit">{item.unit}</span></td><td>{item.threshold} {item.unit}</td><td><span className={`status ${low ? 'low' : 'good'}`}><i />{low ? 'Low stock' : 'In stock'}</span></td><td><div className="row-actions"><button aria-label={`Edit ${item.name}`} onClick={() => openEdit(item)}><Icon name="edit" /></button><button className="delete-action" aria-label={`Delete ${item.name}`} onClick={() => { setSelectedId(item.id); setError(''); setModal('delete') }}><Icon name="trash" /></button></div></td></tr>})}</tbody></table>{!loading && visibleItems.length === 0 && <div className="empty"><Icon name="box" /><h3>No items found</h3><p>{query ? 'Try another search.' : 'Add your first inventory item.'}</p></div>}</div>
+        <div className="table-footer">Showing {visibleItems.length} item{visibleItems.length === 1 ? '' : 's'}</div>
+      </section>
+    </main>
+    {(modal === 'add' || modal === 'edit') && <div className="modal-backdrop" onMouseDown={() => !saving && setModal(null)}><form className="modal" onSubmit={save} onMouseDown={event => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">INVENTORY ITEM</span><h2>{modal === 'add' ? 'Add a new item' : 'Edit item'}</h2></div><button type="button" disabled={saving} onClick={() => setModal(null)}>×</button></div><div className="form-grid"><label className="wide">Item name<input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} required /></label><label>Category ID<input value={draft.categoryId} onChange={event => setDraft({ ...draft, categoryId: event.target.value })} placeholder="Backend category _id" required /></label><label>Category label<input value={draft.categoryName} onChange={event => setDraft({ ...draft, categoryName: event.target.value })} placeholder="Shown in the table" /></label><label>Quantity<input type="number" min="0" value={draft.amount} onChange={event => setDraft({ ...draft, amount: Number(event.target.value) })} required /></label><label>Reorder threshold<input type="number" min="0" value={draft.threshold} onChange={event => setDraft({ ...draft, threshold: Number(event.target.value) })} required /></label><label>SKU<input value={draft.sku} onChange={event => setDraft({ ...draft, sku: event.target.value })} /></label><label>Unit<input value={draft.unit} onChange={event => setDraft({ ...draft, unit: event.target.value })} required /></label><label className="wide">Picture URL<input type="url" value={draft.pictureURL} onChange={event => setDraft({ ...draft, pictureURL: event.target.value })} placeholder="https://..." /></label></div>{error && <p className="api-message error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="secondary" disabled={saving} onClick={() => setModal(null)}>Cancel</button><button className="primary" type="submit" disabled={saving}>{saving ? 'Saving…' : modal === 'add' ? 'Add item' : 'Save changes'}</button></div></form></div>}
+    {modal === 'delete' && <div className="modal-backdrop"><div className="modal delete-modal"><span className="delete-icon"><Icon name="trash" /></span><h2>Delete this item?</h2><p>This will permanently remove <strong>{items.find(item => item.id === selectedId)?.name}</strong> from the server.</p>{error && <p className="api-message error" role="alert">{error}</p>}<div className="modal-actions"><button className="secondary" disabled={saving} onClick={() => setModal(null)}>Cancel</button><button className="danger" disabled={saving} onClick={() => void confirmDelete()}>{saving ? 'Deleting…' : 'Delete item'}</button></div></div></div>}
+  </div>
 }
 
 export default App
