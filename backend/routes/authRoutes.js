@@ -10,6 +10,9 @@ router.post('/register', authController.register);
 // Login Route
 router.post('/login', authController.login);
 
+// Current User Route (restores a session from a stored token)
+router.get('/me', protect, authController.getCurrentUser);
+
 // Email Verification Route (clicked directly from the verification email)
 router.get('/verify-email/:token', authController.verifyEmail);
 

@@ -573,6 +573,10 @@ type Company = { name: string; type: string; accent: string; manager: string }
 function App() {
   // ---------------- State ----------------
   const [loggedIn, setLoggedIn] = useState(false)
+  // True only while checking whether a stored token from a previous session
+  // is still valid, right after the app loads -- keeps the login page from
+  // flashing for a moment before the dashboard takes over.
+  const [checkingSession, setCheckingSession] = useState(true)
   const [page, setPage] = useState<Page>('dashboard')
   const [items, setItems] = useState<Item[]>([])
   const [company, setCompany] = useState<Company>({
@@ -811,9 +815,13 @@ function App() {
     .toUpperCase()
 
   // ---------------- Handlers ----------------
-  const handleLogin = async (email: string, password: string) => {
-    const { token, user } = await api.login(email, password)
-    localStorage.setItem('token', token)
+  // Hydrates all of the per-account UI state from a user object -- shared by
+  // a fresh interactive login and by silently restoring a session from a
+  // stored token on page load, so both end up in the exact same state.
+  // showVerifyModalIfUnverified is only true for an interactive login: an
+  // unverified user shouldn't get the blocking "verify your email" modal
+  // shoved at them on every single page refresh.
+  const hydrateSession = (user: api.AuthUser, showVerifyModalIfUnverified: boolean) => {
     // Your User model doesn't store a display name, so this derives one from
     // the email address (e.g. "alex.morgan@coffeehour.com" -> "Alex Morgan")
     // as a fallback for accounts that haven't set a manager name yet.
@@ -842,12 +850,46 @@ function App() {
     setBannerImage(user.bannerImage || undefined)
     setAccountEmail(user.email)
     setAccountVerified(Boolean(user.isVerified))
-    setShowVerifyModal(!user.isVerified)
+    if (showVerifyModalIfUnverified) setShowVerifyModal(!user.isVerified)
     setResendCooldownUntil(
       Number(localStorage.getItem(`verifyResendCooldownUntil:${user.email}`) || 0),
     )
     setLoggedIn(true)
   }
+
+  const handleLogin = async (email: string, password: string) => {
+    const { token, user } = await api.login(email, password)
+    localStorage.setItem('token', token)
+    hydrateSession(user, true)
+  }
+
+  // Restores a session on page load if a token from a previous login is
+  // still sitting in localStorage, so refreshing the page doesn't bounce the
+  // user back to the sign-in form. An invalid/expired token (e.g. older than
+  // the JWT's 24h lifetime) just falls back to the login page as normal.
+  useEffect(() => {
+    const token = localStorage.getItem('token')
+    if (!token) {
+      setCheckingSession(false)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const user = await api.getCurrentUser()
+        if (cancelled) return
+        hydrateSession(user, false)
+      } catch {
+        if (!cancelled) localStorage.removeItem('token')
+      } finally {
+        if (!cancelled) setCheckingSession(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleLogout = () => {
     localStorage.removeItem('token')
@@ -1187,6 +1229,7 @@ function App() {
     }
   }
 
+  if (checkingSession) return <div className="session-loading">Loading…</div>
   if (!loggedIn) return <Login onLogin={handleLogin} />
 
   // ---------------- Render ----------------

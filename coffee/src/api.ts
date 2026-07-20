@@ -102,6 +102,18 @@ export async function login(
   return handle(res)
 }
 
+// Restores a session from the token already in localStorage (e.g. after a
+// page refresh) without re-prompting for a password. Throws (via handle())
+// if the token is missing/expired/invalid -- the caller should treat that as
+// "not logged in" and clear it.
+export async function getCurrentUser(): Promise<AuthUser> {
+  const res = await fetch(buildPath('/api/auth/me'), {
+    headers: { ...authHeaders() },
+  })
+  const data = await handle(res)
+  return data.user ?? data
+}
+
 // bannerImage should be the relative path returned by uploadItemImage() --
 // that upload endpoint isn't actually item-specific, just a generic
 // compress-and-store-an-image endpoint, so it's reused here as-is.

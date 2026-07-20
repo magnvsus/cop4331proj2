@@ -392,6 +392,90 @@ describe('authController.login', () => {
 
     expect(res.status).toHaveBeenCalledWith(500);
   });
+
+  it('honors JWT_EXPIRES_IN when it is set, instead of the hardcoded default', async () => {
+    const previous = process.env.JWT_EXPIRES_IN;
+    process.env.JWT_EXPIRES_IN = '7d';
+    try {
+      mockFindOneWithPassword({ _id: 'u1', email: 'user@example.com', password: 'hashed' });
+      bcrypt.compare.mockResolvedValue(true);
+      jwt.sign.mockReturnValue('signed.jwt.token');
+
+      const req = mockRequest({ body: { email: 'user@example.com', password: 'correct' } });
+      const res = mockResponse();
+
+      await authController.login(req, res);
+
+      expect(jwt.sign).toHaveBeenCalledWith({ userId: 'u1' }, process.env.JWT_SECRET, {
+        expiresIn: '7d',
+      });
+    } finally {
+      process.env.JWT_EXPIRES_IN = previous;
+    }
+  });
+});
+
+describe('authController.getCurrentUser', () => {
+  it('returns 404 when the user no longer exists', async () => {
+    User.findById.mockResolvedValue(null);
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.getCurrentUser(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  it('returns the current user and settings for a valid token', async () => {
+    User.findById.mockResolvedValue({
+      _id: 'u1',
+      email: 'user@example.com',
+      isVerified: true,
+      bannerImage: '/uploads/banner.jpg',
+      settings: {
+        companyName: 'Roast Co',
+        businessType: 'Coffee shop',
+        managerName: 'Sam Lee',
+        accentColor: '#112233',
+        notificationsEnabled: true,
+        notificationFrequency: 'daily',
+      },
+    });
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.getCurrentUser(req, res);
+
+    expect(User.findById).toHaveBeenCalledWith('u1');
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      user: {
+        id: 'u1',
+        email: 'user@example.com',
+        isVerified: true,
+        bannerImage: '/uploads/banner.jpg',
+        settings: {
+          companyName: 'Roast Co',
+          businessType: 'Coffee shop',
+          managerName: 'Sam Lee',
+          accentColor: '#112233',
+          notificationsEnabled: true,
+          notificationFrequency: 'daily',
+        },
+      },
+      error: '',
+    });
+  });
+
+  it('returns a 500 when something unexpected fails', async () => {
+    User.findById.mockRejectedValue(new Error('db down'));
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.getCurrentUser(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
 });
 
 describe('authController.updateBanner', () => {

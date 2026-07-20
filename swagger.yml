@@ -90,6 +90,33 @@ paths:
           schema:
             $ref: '#/definitions/errorResponse'
 
+  /api/auth/me:
+    get:
+      tags:
+        - auth
+      summary: Get the current user
+      description: >
+        Restores a session from a stored token (e.g. after a page refresh) without
+        re-prompting for a password. Returns the same user/settings shape as login.
+      operationId: getCurrentUser
+      security:
+        - BearerAuth: []
+      produces:
+        - application/json
+      responses:
+        200:
+          description: OK
+          schema:
+            $ref: '#/definitions/userResponse'
+        404:
+          description: User Not Found
+          schema:
+            $ref: '#/definitions/errorResponse'
+        500:
+          description: Server Error
+          schema:
+            $ref: '#/definitions/errorResponse'
+
   /api/auth/verify-email/{token}:
     get:
       tags:
