@@ -30,6 +30,7 @@ jest.mock('../utils/mailer');
 
 beforeEach(() => {
   mailer.sendVerificationEmail.mockResolvedValue(undefined);
+  mailer.sendAccountDeletedEmail.mockResolvedValue(undefined);
 });
 
 describe('authController.register', () => {
@@ -66,6 +67,61 @@ describe('authController.register', () => {
     expect(res.json).toHaveBeenCalledWith({ error: 'Email is already registered' });
   });
 
+  it('still rejects when the existing account is deactivated but not yet past its deletion grace', async () => {
+    User.findOne.mockResolvedValue({
+      _id: 'existing-id',
+      email: 'taken@example.com',
+      // Deactivated, but only 1 second ago -- nowhere near the 7-day default grace.
+      deactivatesAt: new Date(Date.now() - 1000),
+    });
+    const req = mockRequest({ body: { email: 'taken@example.com', password: 'secret' } });
+    const res = mockResponse();
+
+    await authController.register(req, res);
+
+    expect(User.findByIdAndDelete).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Email is already registered' });
+  });
+
+  it('reclaims the email by deleting an abandoned account past its deletion grace, then registers the new one', async () => {
+    const existingUser = {
+      _id: 'old-id',
+      email: 'taken@example.com',
+      bannerImage: '/uploads/old-banner.jpg',
+      // Deactivated 8 days ago -- past the 7-day default grace period, i.e.
+      // it never got (re)verified in time and is effectively abandoned.
+      deactivatesAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+    };
+    User.findOne.mockResolvedValue(existingUser);
+    Item.find.mockResolvedValue([]);
+    Item.deleteMany.mockResolvedValue({});
+    Category.deleteMany.mockResolvedValue({});
+    User.findByIdAndDelete.mockResolvedValue({});
+    fs.unlink.mockResolvedValue(undefined);
+    bcrypt.genSalt.mockResolvedValue('salt');
+    bcrypt.hash.mockResolvedValue('hashed-password');
+    User.mockImplementation(function (data) {
+      Object.assign(this, data);
+      this.save = jest.fn().mockResolvedValue(undefined);
+    });
+
+    const req = mockRequest({ body: { email: 'taken@example.com', password: 'plain-password' } });
+    const res = mockResponse();
+
+    await authController.register(req, res);
+
+    expect(Item.deleteMany).toHaveBeenCalledWith({ accountID: 'old-id' });
+    expect(Category.deleteMany).toHaveBeenCalledWith({ accountID: 'old-id' });
+    expect(User.findByIdAndDelete).toHaveBeenCalledWith('old-id');
+    expect(mailer.sendAccountDeletedEmail).toHaveBeenCalledWith('taken@example.com');
+    // ...and still goes on to actually create the new account.
+    expect(User).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'taken@example.com', password: 'hashed-password' })
+    );
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+
   it('hashes the password, creates a new user with a verification token, and emails it', async () => {
     User.findOne.mockResolvedValue(null);
     bcrypt.genSalt.mockResolvedValue('salt');
@@ -87,6 +143,7 @@ describe('authController.register', () => {
       password: 'hashed-password',
       emailVerificationToken: expect.any(String),
       emailVerificationExpires: expect.any(Number),
+      deactivatesAt: expect.any(Date),
     });
     expect(save).toHaveBeenCalled();
 
@@ -103,6 +160,34 @@ describe('authController.register', () => {
     expect(res.json).toHaveBeenCalledWith({
       message: 'User registered successfully. Check your email to verify your account.',
     });
+  });
+
+  it('schedules deactivation ACCOUNT_DEACTIVATION_DAYS (default 7) days out at registration, not verification', async () => {
+    const previous = process.env.ACCOUNT_DEACTIVATION_DAYS;
+    delete process.env.ACCOUNT_DEACTIVATION_DAYS;
+    try {
+      User.findOne.mockResolvedValue(null);
+      bcrypt.genSalt.mockResolvedValue('salt');
+      bcrypt.hash.mockResolvedValue('hashed-password');
+      User.mockImplementation(function (data) {
+        Object.assign(this, data);
+        this.save = jest.fn().mockResolvedValue(undefined);
+      });
+
+      const req = mockRequest({ body: { email: 'new@example.com', password: 'plain-password' } });
+      const res = mockResponse();
+      const before = Date.now();
+
+      await authController.register(req, res);
+
+      const [userArg] = User.mock.calls[0];
+      const expectedMs = 7 * 24 * 60 * 60 * 1000;
+      expect(userArg.deactivatesAt).toBeInstanceOf(Date);
+      expect(userArg.deactivatesAt.getTime()).toBeGreaterThanOrEqual(before + expectedMs);
+      expect(userArg.deactivatesAt.getTime()).toBeLessThanOrEqual(Date.now() + expectedMs);
+    } finally {
+      process.env.ACCOUNT_DEACTIVATION_DAYS = previous;
+    }
   });
 
   it('still succeeds if sending the verification email fails', async () => {
@@ -161,12 +246,13 @@ describe('authController.verifyEmail', () => {
     });
   });
 
-  it('marks the account verified and clears the token on success', async () => {
+  it('marks the account verified, clears the token, and clears deactivatesAt for good on success', async () => {
     const save = jest.fn().mockResolvedValue(undefined);
     const user = {
       isVerified: false,
       emailVerificationToken: 'hash',
       emailVerificationExpires: Date.now() + 1000,
+      deactivatesAt: new Date(Date.now() + 1000), // e.g. a still-unexpired registration deadline
       save,
     };
     User.findOne.mockResolvedValue(user);
@@ -178,10 +264,31 @@ describe('authController.verifyEmail', () => {
     expect(user.isVerified).toBe(true);
     expect(user.emailVerificationToken).toBeUndefined();
     expect(user.emailVerificationExpires).toBeUndefined();
+    // Verifying is a one-time gate, not a recurring clock -- deactivatesAt
+    // is cleared, not pushed forward to another future date.
+    expect(user.deactivatesAt).toBeUndefined();
     expect(save).toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.type).toHaveBeenCalledWith('html');
-    expect(res.send).toHaveBeenCalledWith(expect.stringContaining('Email verified'));
+    expect(res.send).toHaveBeenCalledWith(expect.stringContaining('Account confirmed'));
+  });
+
+  it('clears deactivatesAt even when reactivating an already-deactivated account', async () => {
+    const save = jest.fn().mockResolvedValue(undefined);
+    const user = {
+      isVerified: false,
+      emailVerificationToken: 'hash',
+      emailVerificationExpires: Date.now() + 1000,
+      deactivatesAt: new Date(Date.now() - 60 * 1000), // already past its deadline
+      save,
+    };
+    User.findOne.mockResolvedValue(user);
+    const req = mockRequest({ params: { token: 'raw-token' } });
+    const res = mockResponse();
+
+    await authController.verifyEmail(req, res);
+
+    expect(user.deactivatesAt).toBeUndefined();
   });
 
   it('returns a 500 page when something unexpected fails', async () => {
@@ -259,7 +366,11 @@ describe('authController.resendVerification', () => {
 
     expect(user.emailVerificationToken).toEqual(expect.any(String));
     expect(save).toHaveBeenCalled();
-    expect(mailer.sendVerificationEmail).toHaveBeenCalledWith('user@example.com', expect.any(String));
+    expect(mailer.sendVerificationEmail).toHaveBeenCalledWith(
+      'user@example.com',
+      expect.any(String),
+      'verify'
+    );
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({ message: 'Verification email sent' });
   });
@@ -351,6 +462,7 @@ describe('authController.login', () => {
         email: 'user@example.com',
         isVerified: true,
         bannerImage: 'banner.png',
+        deactivatesAt: null,
         settings: {
           companyName: 'Roast Co',
           businessType: 'Coffee shop',
@@ -362,6 +474,28 @@ describe('authController.login', () => {
       },
       error: '',
     });
+  });
+
+  it('returns the account deactivatesAt when it is set but still in the future', async () => {
+    const deactivatesAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    mockFindOneWithPassword({
+      _id: 'u1',
+      email: 'user@example.com',
+      password: 'hashed',
+      isVerified: true,
+      deactivatesAt,
+    });
+    bcrypt.compare.mockResolvedValue(true);
+    jwt.sign.mockReturnValue('signed.jwt.token');
+
+    const req = mockRequest({ body: { email: 'user@example.com', password: 'correct' } });
+    const res = mockResponse();
+
+    await authController.login(req, res);
+
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ user: expect.objectContaining({ deactivatesAt }) })
+    );
   });
 
   it('defaults bannerImage and settings when the user has none', async () => {
@@ -413,6 +547,143 @@ describe('authController.login', () => {
       process.env.JWT_EXPIRES_IN = previous;
     }
   });
+
+  it('rejects a login once deactivatesAt has elapsed, and auto-sends a reactivation email', async () => {
+    const save = jest.fn().mockResolvedValue(undefined);
+    mockFindOneWithPassword({
+      _id: 'u1',
+      email: 'user@example.com',
+      password: 'hashed',
+      isVerified: true,
+      deactivatesAt: new Date(Date.now() - 1000), // 1s past deactivation, well within the 7-day grace default
+      save,
+    });
+    bcrypt.compare.mockResolvedValue(true);
+    const req = mockRequest({ body: { email: 'user@example.com', password: 'correct' } });
+    const res = mockResponse();
+
+    await authController.login(req, res);
+
+    expect(jwt.sign).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'ACCOUNT_DEACTIVATED' })
+    );
+    expect(mailer.sendVerificationEmail).toHaveBeenCalledWith(
+      'user@example.com',
+      expect.any(String),
+      'reactivate'
+    );
+    expect(save).toHaveBeenCalled();
+  });
+
+  it('rejects a login for an account that never verified in time, same as one that verified and went unused', async () => {
+    const save = jest.fn().mockResolvedValue(undefined);
+    mockFindOneWithPassword({
+      _id: 'u1',
+      email: 'user@example.com',
+      password: 'hashed',
+      isVerified: false,
+      // deactivatesAt is set at registration now, so an unverified account
+      // can still hit this -- it's no longer only reachable post-verification.
+      deactivatesAt: new Date(Date.now() - 1000),
+      save,
+    });
+    bcrypt.compare.mockResolvedValue(true);
+    const req = mockRequest({ body: { email: 'user@example.com', password: 'correct' } });
+    const res = mockResponse();
+
+    await authController.login(req, res);
+
+    expect(jwt.sign).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'ACCOUNT_DEACTIVATED' })
+    );
+    expect(mailer.sendVerificationEmail).toHaveBeenCalledWith(
+      'user@example.com',
+      expect.any(String),
+      'reactivate'
+    );
+  });
+
+  it('does not auto-send a reactivation email while the resend cooldown is still active', async () => {
+    const save = jest.fn().mockResolvedValue(undefined);
+    mockFindOneWithPassword({
+      _id: 'u1',
+      email: 'user@example.com',
+      password: 'hashed',
+      isVerified: true,
+      deactivatesAt: new Date(Date.now() - 1000),
+      // A token issued 10s ago -- well within the 60s cooldown.
+      emailVerificationExpires: new Date(Date.now() + 24 * 60 * 60 * 1000 - 10 * 1000),
+      save,
+    });
+    bcrypt.compare.mockResolvedValue(true);
+    const req = mockRequest({ body: { email: 'user@example.com', password: 'correct' } });
+    const res = mockResponse();
+
+    await authController.login(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'ACCOUNT_DEACTIVATED' })
+    );
+    expect(mailer.sendVerificationEmail).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('permanently deletes an account once ACCOUNT_DELETION_GRACE_DAYS has passed since deactivation', async () => {
+    mockFindOneWithPassword({
+      _id: 'u1',
+      email: 'user@example.com',
+      password: 'hashed',
+      isVerified: true,
+      bannerImage: '/uploads/banner.jpg',
+      // Deactivated 8 days ago -- past the 7-day default grace period.
+      deactivatesAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+    });
+    bcrypt.compare.mockResolvedValue(true);
+    Item.find.mockResolvedValue([{ pictureURL: '/uploads/item1.jpg' }]);
+    Item.deleteMany.mockResolvedValue({});
+    Category.deleteMany.mockResolvedValue({});
+    User.findByIdAndDelete.mockResolvedValue({});
+    fs.unlink.mockResolvedValue(undefined);
+    const req = mockRequest({ body: { email: 'user@example.com', password: 'correct' } });
+    const res = mockResponse();
+
+    await authController.login(req, res);
+
+    expect(Item.deleteMany).toHaveBeenCalledWith({ accountID: 'u1' });
+    expect(Category.deleteMany).toHaveBeenCalledWith({ accountID: 'u1' });
+    expect(User.findByIdAndDelete).toHaveBeenCalledWith('u1');
+    expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining('item1.jpg'));
+    expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining('banner.jpg'));
+    expect(mailer.sendVerificationEmail).not.toHaveBeenCalled();
+    expect(mailer.sendAccountDeletedEmail).toHaveBeenCalledWith('user@example.com');
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'ACCOUNT_DELETED' })
+    );
+  });
+
+  it('still allows login before deactivatesAt is reached', async () => {
+    mockFindOneWithPassword({
+      _id: 'u1',
+      email: 'user@example.com',
+      password: 'hashed',
+      isVerified: true,
+      deactivatesAt: new Date(Date.now() + 1000),
+    });
+    bcrypt.compare.mockResolvedValue(true);
+    jwt.sign.mockReturnValue('signed.jwt.token');
+    const req = mockRequest({ body: { email: 'user@example.com', password: 'correct' } });
+    const res = mockResponse();
+
+    await authController.login(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
 });
 
 describe('authController.getCurrentUser', () => {
@@ -454,6 +725,7 @@ describe('authController.getCurrentUser', () => {
         email: 'user@example.com',
         isVerified: true,
         bannerImage: '/uploads/banner.jpg',
+        deactivatesAt: null,
         settings: {
           companyName: 'Roast Co',
           businessType: 'Coffee shop',
@@ -475,6 +747,49 @@ describe('authController.getCurrentUser', () => {
     await authController.getCurrentUser(req, res);
 
     expect(res.status).toHaveBeenCalledWith(500);
+  });
+
+  it('rejects restoring a session for a deactivated account', async () => {
+    User.findById.mockResolvedValue({
+      _id: 'u1',
+      email: 'user@example.com',
+      isVerified: true,
+      deactivatesAt: new Date(Date.now() - 1000),
+    });
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.getCurrentUser(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'ACCOUNT_DEACTIVATED' })
+    );
+  });
+
+  it('permanently deletes an account once ACCOUNT_DELETION_GRACE_DAYS has passed, on session restore too', async () => {
+    User.findById.mockResolvedValue({
+      _id: 'u1',
+      email: 'user@example.com',
+      isVerified: true,
+      bannerImage: '',
+      deactivatesAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+    });
+    Item.find.mockResolvedValue([]);
+    Item.deleteMany.mockResolvedValue({});
+    Category.deleteMany.mockResolvedValue({});
+    User.findByIdAndDelete.mockResolvedValue({});
+    const req = mockRequest({ user: { userId: 'u1' } });
+    const res = mockResponse();
+
+    await authController.getCurrentUser(req, res);
+
+    expect(User.findByIdAndDelete).toHaveBeenCalledWith('u1');
+    expect(mailer.sendAccountDeletedEmail).toHaveBeenCalledWith('user@example.com');
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'ACCOUNT_DELETED' })
+    );
   });
 });
 

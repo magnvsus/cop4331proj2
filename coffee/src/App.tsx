@@ -225,6 +225,11 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // Set from the ACCOUNT_DEACTIVATED error code (see api.ts's ApiError) --
+  // shown as a modal rather than the inline error text below the form, since
+  // it's a distinct, more final state than "wrong password, try again."
+  const [showDeactivatedModal, setShowDeactivatedModal] = useState(false)
+  const [deactivatedAt, setDeactivatedAt] = useState<string | null>(null)
 
   const [showRegister, setShowRegister] = useState(false)
   const [regEmail, setRegEmail] = useState('')
@@ -255,7 +260,13 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
     try {
       await onLogin(email, password)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed')
+      if (err instanceof api.ApiError && err.code === 'ACCOUNT_DEACTIVATED') {
+        const value = err.data?.deactivatesAt
+        setDeactivatedAt(typeof value === 'string' ? value : null)
+        setShowDeactivatedModal(true)
+      } else {
+        setError(err instanceof Error ? err.message : 'Login failed')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -563,6 +574,38 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
           </form>
         </div>
       )}
+      {showDeactivatedModal && (
+        <div className="modal-backdrop">
+          <div className="modal notice-modal">
+            <button
+              type="button"
+              className="modal-close"
+              aria-label="Close"
+              onClick={() => setShowDeactivatedModal(false)}
+            >
+              ×
+            </button>
+            <span className="notice-icon danger">
+              <Icon name="alert" />
+            </span>
+            <h2>Account deactivated</h2>
+            <p>
+              {deactivatedAt
+                ? `This account was deactivated on ${new Date(deactivatedAt).toLocaleDateString()} and can no longer sign in.`
+                : 'This account has been deactivated and can no longer sign in.'}
+            </p>
+            <p>
+              A reactivation link is emailed to this account automatically when needed -- check your
+              inbox (and spam folder) and click it to reactivate your account, then sign in again.
+            </p>
+            <div className="modal-actions">
+              <button className="primary" onClick={() => setShowDeactivatedModal(false)}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
@@ -611,6 +654,11 @@ function App() {
   const [showVerifyModal, setShowVerifyModal] = useState(false)
   const [accountEmail, setAccountEmail] = useState('')
   const [accountVerified, setAccountVerified] = useState(false)
+  // The one-time "verify by this date or get locked out" deadline set at
+  // registration -- null for any account that's already verified, since
+  // verifying clears it for good rather than pushing it forward. Shown as a
+  // heads-up on the Settings page; see the Account verification card below.
+  const [accountDeactivatesAt, setAccountDeactivatesAt] = useState<string | null>(null)
   // Timestamp (ms) the resend button becomes usable again -- persisted to
   // localStorage (keyed by email) so the cooldown survives a page refresh,
   // and re-synced from the server's retryAfterSeconds if it ever disagrees
@@ -850,6 +898,7 @@ function App() {
     setBannerImage(user.bannerImage || undefined)
     setAccountEmail(user.email)
     setAccountVerified(Boolean(user.isVerified))
+    setAccountDeactivatesAt(user.deactivatesAt ?? null)
     if (showVerifyModalIfUnverified) setShowVerifyModal(!user.isVerified)
     setResendCooldownUntil(
       Number(localStorage.getItem(`verifyResendCooldownUntil:${user.email}`) || 0),
@@ -1719,6 +1768,21 @@ function App() {
                       : `We sent a verification link to ${accountEmail}. Check your inbox (and spam folder) to verify your account.`}
                   </p>
                 </div>
+                {/* Only unverified accounts ever have a deactivatesAt -- verifyEmail
+                    clears it for good the moment verification succeeds, so this can
+                    never show once the account above reads "Verified". */}
+                {accountDeactivatesAt && (
+                  <div className="verify-status">
+                    <strong>Verification deadline</strong>
+                    <p>
+                      This account must be verified by{' '}
+                      {new Date(accountDeactivatesAt).toLocaleDateString()}, or it will be
+                      automatically deactivated. If that happens, trying to log in sends a fresh
+                      activation link by email -- using it reactivates the account. It's permanently
+                      deleted if it stays deactivated for a week without being reactivated.
+                    </p>
+                  </div>
+                )}
                 {!accountVerified && (
                   <>
                     <button
