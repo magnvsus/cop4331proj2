@@ -5,7 +5,7 @@ const Category = require('../models/Category');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { deleteLocalUpload } = require('../utils/localUploads');
-const { sendVerificationEmail } = require('../utils/mailer');
+const { sendVerificationEmail, sendAccountDeletedEmail } = require('../utils/mailer');
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
 const RESEND_VERIFICATION_COOLDOWN_MS = 60 * 1000;
@@ -29,17 +29,21 @@ function accountDeletionGraceMs() {
     return (Number.isFinite(days) && days > 0 ? days : 7) * 24 * 60 * 60 * 1000;
 }
 
-// Accounts are only ever placed on this clock at verification time (see
-// verifyEmail) -- an account that's never been verified has no deactivatesAt
-// and is never blocked by this check.
+// Every account is on this clock from the moment it's registered (see
+// register), as a one-time "verify within N days or get locked out" deadline
+// -- not a recurring inactivity check. verifyEmail clears deactivatesAt for
+// good the moment it succeeds (on time, or late via the auto-sent
+// reactivation link), so a verified account is never re-deactivated later
+// just for going unused.
 function isDeactivated(user) {
     return Boolean(user.deactivatesAt) && user.deactivatesAt.getTime() <= Date.now();
 }
 
-// A deactivated account that's never reactivated (by clicking a fresh
-// verification link, which resets deactivatesAt -- see verifyEmail) gets
-// permanently deleted this long after it deactivated. Implies isDeactivated,
-// since deactivatesAt + a non-negative grace period is always >= deactivatesAt.
+// An account that misses its verification deadline and is never reactivated
+// (by clicking a fresh link, which clears deactivatesAt -- see verifyEmail)
+// gets permanently deleted this long after it deactivated. Implies
+// isDeactivated, since deactivatesAt + a non-negative grace period is always
+// >= deactivatesAt.
 function isPastDeletionGrace(user) {
     return Boolean(user.deactivatesAt) && Date.now() >= user.deactivatesAt.getTime() + accountDeletionGraceMs();
 }
@@ -67,14 +71,32 @@ async function deleteUserAccount(userId, user) {
     await User.findByIdAndDelete(userId);
 }
 
+// Specifically for the "never (re)activated within the grace period" path
+// (login, getCurrentUser, and register reclaiming an abandoned email) --
+// unlike a user-initiated deleteAccount, this one also emails the address
+// to say what happened, since the owner never took any action to cause it.
+// The notification is best-effort: a mail failure shouldn't turn an
+// otherwise-successful deletion into a 500.
+async function deleteInactiveAccount(user) {
+    await deleteUserAccount(user._id, user);
+    try {
+        await sendAccountDeletedEmail(user.email);
+    } catch (emailError) {
+        console.error('Failed to send account-deleted email:', emailError.message);
+    }
+}
+
 // Issues a fresh verification/reactivation token and emails it, unless one
 // was already sent within the last RESEND_VERIFICATION_COOLDOWN_MS -- shared
 // by resendVerification (explicit, logged-in request) and login's
 // auto-resend for a deactivated account (implicit, since a deactivated user
 // can't reach a "resend" button anywhere in the app -- they can't log in).
 // `user` must have emailVerificationExpires selected, since that field
-// doubles as the "last sent" marker this cooldown is based on.
-async function issueAndSendVerificationToken(user) {
+// doubles as the "last sent" marker this cooldown is based on. `reason` is
+// passed straight through to sendVerificationEmail to pick the right
+// wording -- 'verify' (default) for a never-verified account, 'reactivate'
+// for a deactivated one.
+async function issueAndSendVerificationToken(user, reason = 'verify') {
     const lastSentAt = user.emailVerificationExpires
         ? user.emailVerificationExpires.getTime() - EMAIL_VERIFICATION_TTL_MS
         : 0;
@@ -88,14 +110,14 @@ async function issueAndSendVerificationToken(user) {
     user.emailVerificationExpires = Date.now() + EMAIL_VERIFICATION_TTL_MS;
     await user.save();
 
-    await sendVerificationEmail(user.email, rawToken);
+    await sendVerificationEmail(user.email, rawToken, reason);
     return { sent: true };
 }
 
-// Doubles as the reactivation confirmation page -- verifyEmail always
-// resets deactivatesAt on a successful match, whether this is someone's
-// first verification or a deactivated account being reactivated, so the
-// copy stays neutral rather than assuming which case it is.
+// Doubles as the reactivation confirmation page -- verifyEmail always clears
+// deactivatesAt on a successful match, whether this is someone's on-time
+// first verification or a deactivated account being reactivated late, so
+// the copy stays neutral rather than assuming which case it is.
 function verificationEmailPage(success) {
     const title = success ? 'Account confirmed' : 'Verification failed';
     const message = success
@@ -156,8 +178,18 @@ exports.register = async (req, res) => {
 
         //check if a user is already created
         const existingUser = await User.findOne({ email });
-        if (existingUser) { //if existingUser is empty
-            return res.status(400).json({ error: 'Email is already registered'});
+        if (existingUser) {
+            // The old account never verified in time and its grace period
+            // has also elapsed -- it's already effectively dead, just not
+            // yet lazily cleaned up (see isPastDeletionGrace). Reclaim the
+            // email for the new registration instead of blocking on an
+            // abandoned account; deleteInactiveAccount also notifies the
+            // address that the old one was removed.
+            if (isPastDeletionGrace(existingUser)) {
+                await deleteInactiveAccount(existingUser);
+            } else {
+                return res.status(400).json({ error: 'Email is already registered'});
+            }
         }
 
         // Hash the password
@@ -166,12 +198,16 @@ exports.register = async (req, res) => {
 
         const { rawToken, hashedToken } = createVerificationToken();
 
-        // Create and save new user
+        // Create and save new user. deactivatesAt starts counting down from
+        // registration itself, not from verification -- an account that
+        // never gets verified in time is blocked from logging in the same
+        // way an account that verified and then went unused would be.
         const newUser = new User({
             email,
             password: hashedPassword,
             emailVerificationToken: hashedToken,
-            emailVerificationExpires: Date.now() + EMAIL_VERIFICATION_TTL_MS
+            emailVerificationExpires: Date.now() + EMAIL_VERIFICATION_TTL_MS,
+            deactivatesAt: new Date(Date.now() + accountDeactivationMs())
         });
 
         await newUser.save();
@@ -211,7 +247,11 @@ exports.verifyEmail = async (req, res) => {
         user.isVerified = true;
         user.emailVerificationToken = undefined;
         user.emailVerificationExpires = undefined;
-        user.deactivatesAt = new Date(Date.now() + accountDeactivationMs());
+        // Verifying is a one-time gate, not a recurring clock: succeeding
+        // here -- whether that's on time or late, via the auto-sent
+        // reactivation link -- clears deactivatesAt for good. A verified
+        // account is never re-deactivated later just for going unused.
+        user.deactivatesAt = undefined;
         await user.save();
 
         res.status(200).type('html').send(verificationEmailPage(true));
@@ -270,7 +310,7 @@ exports.login = async (req, res) => {
             // Never reactivated within the grace period -- permanently
             // delete rather than leave it locked out forever.
             if (isPastDeletionGrace(user)) {
-                await deleteUserAccount(user._id, user);
+                await deleteInactiveAccount(user);
                 return res.status(403).json({
                     error: 'This account was deactivated and has since been permanently deleted due to inactivity.',
                     code: 'ACCOUNT_DELETED'
@@ -282,7 +322,7 @@ exports.login = async (req, res) => {
             // this catch) is what actually prevents spamming a mailbox from
             // repeated login attempts.
             try {
-                await issueAndSendVerificationToken(user);
+                await issueAndSendVerificationToken(user, 'reactivate');
             } catch (emailError) {
                 console.error('Failed to send reactivation email:', emailError.message);
             }
@@ -329,7 +369,7 @@ exports.getCurrentUser = async (req, res) => {
         // deactivatesAt just because the JWT itself hasn't expired yet.
         if (isDeactivated(user)) {
             if (isPastDeletionGrace(user)) {
-                await deleteUserAccount(user._id, user);
+                await deleteInactiveAccount(user);
                 return res.status(403).json({
                     error: 'This account was deactivated and has since been permanently deleted due to inactivity.',
                     code: 'ACCOUNT_DELETED'

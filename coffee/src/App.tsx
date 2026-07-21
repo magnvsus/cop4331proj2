@@ -594,6 +594,10 @@ function Login({ onLogin }: { onLogin: (email: string, password: string) => Prom
                 ? `This account was deactivated on ${new Date(deactivatedAt).toLocaleDateString()} and can no longer sign in.`
                 : 'This account has been deactivated and can no longer sign in.'}
             </p>
+            <p>
+              A reactivation link is emailed to this account automatically when needed -- check your
+              inbox (and spam folder) and click it to reactivate your account, then sign in again.
+            </p>
             <div className="modal-actions">
               <button className="primary" onClick={() => setShowDeactivatedModal(false)}>
                 OK
@@ -650,11 +654,10 @@ function App() {
   const [showVerifyModal, setShowVerifyModal] = useState(false)
   const [accountEmail, setAccountEmail] = useState('')
   const [accountVerified, setAccountVerified] = useState(false)
-  // When the account will be auto-deactivated (locked out of login) if it's
-  // never reactivated -- always in the future for anyone who can actually
-  // see this state, since login itself blocks access once it's passed.
-  // Shown as a heads-up on the Settings page; see accountDeactivatesAt usage
-  // in the Account verification card below.
+  // The one-time "verify by this date or get locked out" deadline set at
+  // registration -- null for any account that's already verified, since
+  // verifying clears it for good rather than pushing it forward. Shown as a
+  // heads-up on the Settings page; see the Account verification card below.
   const [accountDeactivatesAt, setAccountDeactivatesAt] = useState<string | null>(null)
   // Timestamp (ms) the resend button becomes usable again -- persisted to
   // localStorage (keyed by email) so the cooldown survives a page refresh,
@@ -1765,15 +1768,18 @@ function App() {
                       : `We sent a verification link to ${accountEmail}. Check your inbox (and spam folder) to verify your account.`}
                   </p>
                 </div>
-                {accountVerified && accountDeactivatesAt && (
+                {/* Only unverified accounts ever have a deactivatesAt -- verifyEmail
+                    clears it for good the moment verification succeeds, so this can
+                    never show once the account above reads "Verified". */}
+                {accountDeactivatesAt && (
                   <div className="verify-status">
-                    <strong>Deactivation scheduled</strong>
+                    <strong>Verification deadline</strong>
                     <p>
-                      This account will be automatically deactivated on{' '}
-                      {new Date(accountDeactivatesAt).toLocaleDateString()}. If that happens, trying
-                      to log in sends a new activation link by email -- using it reactivates the
-                      account. It's permanently deleted if it stays deactivated for a week without
-                      being reactivated.
+                      This account must be verified by{' '}
+                      {new Date(accountDeactivatesAt).toLocaleDateString()}, or it will be
+                      automatically deactivated. If that happens, trying to log in sends a fresh
+                      activation link by email -- using it reactivates the account. It's permanently
+                      deleted if it stays deactivated for a week without being reactivated.
                     </p>
                   </div>
                 )}

@@ -33,7 +33,13 @@ paths:
       description: >
         Creates a new user account and emails a verification link to it. Does not log the
         user in -- call /api/auth/login afterward to get a token. The account can be used
-        before verifying; isVerified just tracks whether the link has been clicked yet.
+        before verifying, but only until deactivatesAt (registration + ACCOUNT_DEACTIVATION_DAYS)
+        -- an account that never verifies in time is blocked from logging in the same way an
+        already-verified account that went unused would be. See /api/auth/login's 403 response.
+        If the email belongs to an existing account that's already past its deletion grace
+        (ACCOUNT_DELETION_GRACE_DAYS since it deactivated, i.e. effectively abandoned), that
+        old account is deleted -- along with all its data, and an email noting the deletion --
+        and this call proceeds to create the new one instead of rejecting with 400.
       operationId: register
       consumes:
         - application/json
@@ -51,7 +57,9 @@ paths:
           schema:
             $ref: '#/definitions/messageResponse'
         400:
-          description: Bad Request (missing fields, password too short, or email already registered)
+          description: >
+            Bad Request (missing fields, password too short, or email already registered to
+            an account that isn't past its deletion grace yet)
           schema:
             $ref: '#/definitions/errorResponse'
         500:
@@ -687,7 +695,11 @@ definitions:
       deactivatesAt:
         type: string
         format: date-time
-        description: When this account will be auto-deactivated. Only present on login and /me responses; null if the account isn't verified yet.
+        description: >
+          One-time verification deadline (registration + ACCOUNT_DEACTIVATION_DAYS) --
+          not a recurring inactivity check. Cleared to null for good once the account
+          is verified, whether on time or late via reactivation. Only present on login
+          and /me responses.
         example: '2026-07-27T00:00:00.000Z'
       settings:
         $ref: '#/definitions/accountSettings'
