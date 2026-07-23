@@ -2,7 +2,7 @@
 
 <img src="coffee/src/assets/icon.png" alt="Inventory Hub app icon" width="120" />
 
-A coffee-shop inventory management app (COP 4331 project) with a Node/Express/MongoDB backend and a React/Vite frontend.
+A coffee-shop inventory management app with a Node/Express/MongoDB backend and a React/Vite frontend.
 
 ## Project layout
 
